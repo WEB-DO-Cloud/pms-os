@@ -1,0 +1,146 @@
+# PMS OS self-contained stack: Postgres + migrate → web + worker.
+# Secrets come from .env (see .env.example). Do not bake secrets into images.
+#
+# Host networking: on some Linux hosts Docker's docker-proxy breaks Postgres
+# port publishing. Prefer the default bridge network below. Postgres is
+# expose-only (not published) so host Postgres can coexist.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-pms}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-pms_os}
+    volumes:
+      - pms_pgdata:/var/lib/postgresql/data
+    # Internal only — do not publish 5432 on hosts that already run Postgres.
+    expose:
+      - "5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pms} -d ${POSTGRES_DB:-pms_os}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  migrate:
+    build:
+      context: .
+      target: migrate
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  web:
+    build:
+      context: .
+      target: web
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET in .env}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3000}
+      # commercial = multi-tenant SaaS (always-on /signup). community = one-time /setup.
+      PMS_EDITION: ${PMS_EDITION:-community}
+      SUPER_ADMIN_EMAILS: ${SUPER_ADMIN_EMAILS:-}
+      SECRETS_ENCRYPTION_KEY: ${SECRETS_ENCRYPTION_KEY:?set SECRETS_ENCRYPTION_KEY in .env}
+      SYNC_INTERNAL_SECRET: ${SYNC_INTERNAL_SECRET:?set SYNC_INTERNAL_SECRET in .env}
+      CHANNEX_API_BASE: ${CHANNEX_API_BASE:-https://staging.channex.io/api/v1}
+      # Commercial: platform master Channex account (per-network scoping via Channex group).
+      CHANNEX_API_KEY: ${CHANNEX_API_KEY:-}
+      CHANNEX_WEBHOOK_SECRET: ${CHANNEX_WEBHOOK_SECRET:-}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_PRICE_HOTEL: ${STRIPE_PRICE_HOTEL:-}
+      STRIPE_PRICE_PROPERTY: ${STRIPE_PRICE_PROPERTY:-}
+      HOST: "0.0.0.0"
+      PORT: "3000"
+      NODE_ENV: production
+    ports:
+      # Loopback only; point your reverse proxy at this port for the app.
+      - "127.0.0.1:33100:3000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
+
+  website:
+    build:
+      context: .
+      target: website
+    restart: unless-stopped
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "3000"
+      NODE_ENV: production
+    ports:
+      # Loopback only; point your reverse proxy at this port for the website.
+      - "127.0.0.1:33101:3000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  worker:
+    build:
+      context: .
+      target: worker
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env}
+      SECRETS_ENCRYPTION_KEY: ${SECRETS_ENCRYPTION_KEY:?set SECRETS_ENCRYPTION_KEY in .env}
+      SYNC_INTERNAL_SECRET: ${SYNC_INTERNAL_SECRET:?set SYNC_INTERNAL_SECRET in .env}
+      CHANNEX_API_BASE: ${CHANNEX_API_BASE:-https://staging.channex.io/api/v1}
+      WEB_INTERNAL_URL: ${WEB_INTERNAL_URL:-http://web:3000}
+      SYNC_NETWORK_IDS: ${SYNC_NETWORK_IDS:-1}
+      SYNC_WORKER_INTERVAL_MS: ${SYNC_WORKER_INTERVAL_MS:-30000}
+      WORKER_HEALTH_FILE: ${WORKER_HEALTH_FILE:-/tmp/pms-worker-health.json}
+      # http = call web internal sync APIs (shares web process store with webhooks)
+      SYNC_WORKER_MODE: ${SYNC_WORKER_MODE:-http}
+      NODE_ENV: production
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      web:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "const fs=require('fs');const p=process.env.WORKER_HEALTH_FILE||'/tmp/pms-worker-health.json';const h=JSON.parse(fs.readFileSync(p,'utf8'));if(Date.now()-Date.parse(h.lastTickAt)>120000)process.exit(1)",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+
+volumes:
+  pms_pgdata:

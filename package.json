@@ -1,0 +1,20 @@
+{
+  "name": "pms-os",
+  "private": true,
+  "packageManager": "pnpm@10.34.5",
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev --filter=@pms/web",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "typecheck": "turbo run typecheck",
+    "db:generate": "pnpm --filter @pms/db generate",
+    "db:migrate": "pnpm --filter @pms/db migrate",
+    "worker": "pnpm --filter @pms/sync worker"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "turbo": "^2.5.4",
+    "typescript": "^5.8.3"
+  }
+}
