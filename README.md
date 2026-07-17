@@ -1,5 +1,7 @@
 # PMS OS
 
+![PMS OS dashboard — connect OTAs and get started](./docs/assets/dashboard.png)
+
 Open-source Property Management System for hotels and vacation rentals — reservations, channel sync (Channex), operations, and revenue tools in one stack.
 
 Built and maintained by [WEB DO Cloud](https://github.com/WEB-DO-Cloud).
