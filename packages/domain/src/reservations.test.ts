@@ -255,6 +255,79 @@ describe('Booking CRS direct creation (U5)', () => {
     ])
   })
 
+  it('stale baseSnapshotVersion rejects before enqueue', async () => {
+    const store = createMemoryStore()
+    enableBookingCrs(store)
+    store.ariAvailability.push({
+      networkId: 1,
+      propertyId: 10,
+      roomTypeId: 5,
+      date: '2026-08-01',
+      availability: 2,
+      snapshotVersion: 4,
+      pulledAt: new Date().toISOString(),
+    })
+    const created = await runCommand(
+      'createDirectReservation',
+      ctx(principal()),
+      { ...crsInput, baseSnapshotVersion: 3 },
+      { store },
+    )
+    expect(created.status).toBe('rejected')
+    expect(created.error?.code).toBe('STALE_SNAPSHOT')
+    expect(store.reservations).toHaveLength(0)
+    expect(store.ariWriteIntents).toHaveLength(0)
+  })
+
+  it('zero vacancy on a stay night rejects (AE5)', async () => {
+    const store = createMemoryStore()
+    enableBookingCrs(store)
+    store.ariAvailability.push({
+      networkId: 1,
+      propertyId: 10,
+      roomTypeId: 5,
+      date: '2026-08-01',
+      availability: 0,
+      snapshotVersion: 1,
+      pulledAt: new Date().toISOString(),
+    })
+    const created = await runCommand(
+      'createDirectReservation',
+      ctx(principal()),
+      { ...crsInput, baseSnapshotVersion: 1 },
+      { store },
+    )
+    expect(created.status).toBe('rejected')
+    expect(created.error?.code).toBe('CONFLICT')
+    expect(store.reservations).toHaveLength(0)
+    expect(store.ariWriteIntents).toHaveLength(0)
+  })
+
+  it('fresh snapshot + positive vacancy still enqueues', async () => {
+    const store = createMemoryStore()
+    enableBookingCrs(store)
+    const now = new Date().toISOString()
+    for (const date of ['2026-08-01', '2026-08-02']) {
+      store.ariAvailability.push({
+        networkId: 1,
+        propertyId: 10,
+        roomTypeId: 5,
+        date,
+        availability: 1,
+        snapshotVersion: 2,
+        pulledAt: now,
+      })
+    }
+    const created = await runCommand(
+      'createDirectReservation',
+      ctx(principal()),
+      { ...crsInput, baseSnapshotVersion: 2 },
+      { store },
+    )
+    expect(created.status).toBe('ok')
+    expect(store.ariWriteIntents[0]?.baseSnapshotVersion).toBe(2)
+  })
+
   it('idempotent double-submit same key → one booking and one intent', async () => {
     const store = createMemoryStore()
     enableBookingCrs(store)

@@ -224,6 +224,7 @@ export {
   offlineReservationCode,
   splitGuestName,
   stayNightDates,
+  assertRoomTypeVacancy,
   type CreateDirectReservationInput,
 } from './commands/create-direct-reservation'
 export {

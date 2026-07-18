@@ -17,6 +17,7 @@ export default defineEventHandler(async (event) => {
     roomTypeId?: number
     ratePlanChannexId?: string
     days?: Record<string, string>
+    baseSnapshotVersion?: number
     idempotencyKey?: string
   }
   const networkId = parseNetworkId(body.networkId)
@@ -45,6 +46,13 @@ export default defineEventHandler(async (event) => {
   if (!body.days || typeof body.days !== 'object') {
     throw createError({ statusCode: 400, statusMessage: 'days (nightly prices) required' })
   }
+  const baseSnapshotVersion = Number(body.baseSnapshotVersion)
+  if (!Number.isFinite(baseSnapshotVersion) || !Number.isInteger(baseSnapshotVersion)) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: 'baseSnapshotVersion required',
+    })
+  }
 
   return createDirectBooking(principal, {
     propertyId,
@@ -58,6 +66,7 @@ export default defineEventHandler(async (event) => {
     roomTypeId,
     ratePlanChannexId: body.ratePlanChannexId.trim(),
     days: body.days,
+    baseSnapshotVersion,
     idempotencyKey: body.idempotencyKey,
   })
 })

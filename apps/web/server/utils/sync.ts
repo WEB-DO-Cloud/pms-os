@@ -8,6 +8,7 @@ import {
   markSyncHealthy,
   processAckOutbox,
   processAriWriteOutbox,
+  processBookingCrsOutbox,
   resolveSecret,
   runAriPull,
   runBookingRevisionPull,
@@ -309,13 +310,17 @@ export async function runInternalAck(networkId: number) {
   return processAckOutbox(store, client, networkId)
 }
 
-/** Drain availability (and future ARI) write intents for a network. */
+/** Drain ARI + booking_crs write intents for a network (http worker cycle). */
 export async function runInternalAriWrite(networkId: number) {
   const store = await ensureSecretsHydrated(networkId)
   const client = getChannexClientForNetwork(store, networkId)
   const result = await processAriWriteOutbox(store, client, networkId)
+  const bookingCrs = await processBookingCrsOutbox(store, client, networkId)
   // ponytail: best-effort PG status write-through; memory is authoritative in-process.
-  if (process.env.DATABASE_URL && result.processed > 0) {
+  if (
+    process.env.DATABASE_URL &&
+    (result.processed > 0 || bookingCrs.processed > 0)
+  ) {
     try {
       const { persistAriIntentStatus } = await import('../lib/ari-persistence')
       for (const intent of store.domain.ariWriteIntents.filter(
@@ -323,7 +328,8 @@ export async function runInternalAriWrite(networkId: number) {
           i.networkId === networkId &&
           (i.lane === 'availability' ||
             i.lane === 'restrictions' ||
-            i.lane === 'rate_plan'),
+            i.lane === 'rate_plan' ||
+            i.lane === 'booking_crs'),
       )) {
         await persistAriIntentStatus(getDb(), intent)
       }
@@ -331,7 +337,7 @@ export async function runInternalAriWrite(networkId: number) {
       // Missing migration / unit tests without PG.
     }
   }
-  return result
+  return { ...result, bookingCrs }
 }
 
 export async function runInternalImport(networkId: number) {

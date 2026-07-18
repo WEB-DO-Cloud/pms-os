@@ -11,8 +11,8 @@ import {
   type DomainStore,
   type ReservationRecord,
 } from '@pms/domain'
-import type { ChannexCreateBookingInput, PropertyRow } from '@pms/sync'
-import { ChannexApiError } from '@pms/sync'
+import type { PropertyRow } from '@pms/sync'
+import { sendOrResumeBookingCrsIntent } from '@pms/sync'
 import { createError } from 'h3'
 import {
   applyWriteBackResult,
@@ -82,11 +82,6 @@ export type DirectBookingWriteBack = (
   reservation: ReservationRecord,
 ) => Promise<DirectBookingWriteBackResult>
 
-type BookingCrsPayload = ChannexCreateBookingInput & {
-  _local?: { reservationId: number; roomTypeId: number }
-  property_id: string | null
-}
-
 function findBookingCrsIntent(store: DomainStore, reservation: ReservationRecord) {
   const code = reservation.otaReservationCode
   if (!code) return null
@@ -115,7 +110,9 @@ export async function defaultDirectBookingWriteBack(
     return { ok: false, reason: 'booking_crs_intent_missing' }
   }
 
-  // Timeout / restart after send: resume reconciliation — never blind second create.
+  const sync = getSyncStore(reservation.networkId)
+
+  // Timeout / restart after send: resume without client — never blind second create.
   if (
     intent.status === 'accepted' ||
     intent.status === 'reconciling' ||
@@ -125,7 +122,11 @@ export async function defaultDirectBookingWriteBack(
       reservation.channexBookingId ??
       (typeof intent.channexTaskIds[0] === 'string' ? intent.channexTaskIds[0] : null)
     if (acceptedId) {
-      return { ok: true, channexBookingId: acceptedId, reconciled: intent.status === 'reconciled' }
+      return {
+        ok: true,
+        channexBookingId: acceptedId,
+        reconciled: intent.status === 'reconciled',
+      }
     }
     return { ok: false, reason: 'awaiting_channex_revision' }
   }
@@ -146,31 +147,14 @@ export async function defaultDirectBookingWriteBack(
     return { ok: false, reason: message.replace(/\s+/g, '_').toLowerCase() }
   }
 
-  const payload = intent.payload as BookingCrsPayload
-  const bookingBody: ChannexCreateBookingInput = {
-    property_id: property.channexId,
-    ota_reservation_code: payload.ota_reservation_code,
-    ota_name: 'Offline',
-    arrival_date: payload.arrival_date,
-    departure_date: payload.departure_date,
-    currency: payload.currency,
-    customer: payload.customer,
-    rooms: payload.rooms,
-  }
-
-  intent.status = 'sending'
-  intent.attempts += 1
-  intent.updatedAt = new Date().toISOString()
-
-  try {
-    const res = await client.createBooking(bookingBody)
-    const bookingId = res.data.attributes.booking_id || res.data.id
-    // HTTP accept ≠ confirmed (AE3); store id and wait for revision.
-    intent.status = 'accepted'
-    intent.channexTaskIds = [bookingId]
-    intent.lastError = null
-    intent.updatedAt = new Date().toISOString()
-    if (process.env.DATABASE_URL) {
+  const outcome = await sendOrResumeBookingCrsIntent(
+    sync,
+    client,
+    intent,
+    property.channexId,
+  )
+  if (outcome.ok) {
+    if (process.env.DATABASE_URL && outcome.posted) {
       try {
         const { getDb } = await import('./auth')
         const { persistAriIntentStatus } = await import('../lib/ari-persistence')
@@ -179,30 +163,13 @@ export async function defaultDirectBookingWriteBack(
         // ponytail: best-effort PG status; memory remains source until hydrate path matures.
       }
     }
-    return { ok: true, channexBookingId: bookingId, reconciled: false }
-  } catch (err) {
-    const reason =
-      err instanceof ChannexApiError
-        ? `channex_${err.status}`
-        : err instanceof Error
-          ? err.message
-          : 'channex_write_failed'
-    // Unknown network outcome: leave sending so resume skips blind recreate
-    // when Channex may have accepted (ponytail: ceiling — no GET-by-ota-code yet;
-    // upgrade: poll booking by ota_reservation_code before retry POST).
-    if (err instanceof ChannexApiError && err.status >= 500) {
-      intent.status = 'retry'
-      intent.nextAttemptAt = new Date(Date.now() + 60_000).toISOString()
-    } else if (!(err instanceof ChannexApiError)) {
-      intent.status = 'retry'
-      intent.nextAttemptAt = new Date(Date.now() + 60_000).toISOString()
-    } else {
-      intent.status = 'failed'
+    return {
+      ok: true,
+      channexBookingId: outcome.channexBookingId,
+      reconciled: outcome.reconciled,
     }
-    intent.lastError = reason
-    intent.updatedAt = new Date().toISOString()
-    return { ok: false, reason }
   }
+  return { ok: false, reason: outcome.reason }
 }
 
 export function requireReservationsModule(principal: PrincipalContext) {
@@ -240,6 +207,8 @@ export type CreateDirectBookingInput = {
   roomTypeId: number
   ratePlanChannexId: string
   days: Record<string, string>
+  /** Required for user/calendar creates — stale snapshot rejects. */
+  baseSnapshotVersion: number
   idempotencyKey?: string
 }
 
@@ -254,6 +223,16 @@ export async function createDirectBooking(
   }
   if (principal.networkId == null) {
     throw createError({ statusCode: 403, statusMessage: 'Network required' })
+  }
+  if (
+    !Number.isFinite(input.baseSnapshotVersion) ||
+    !Number.isInteger(input.baseSnapshotVersion)
+  ) {
+    throw createError({
+      statusCode: 400,
+      statusMessage: 'baseSnapshotVersion required',
+      data: { code: 'VALIDATION' },
+    })
   }
 
   const store = getDomainStore(principal.networkId)
@@ -321,6 +300,7 @@ export async function createDirectBooking(
       roomTypeChannexId: roomType.channexId,
       ratePlanChannexId: input.ratePlanChannexId,
       days: input.days,
+      baseSnapshotVersion: input.baseSnapshotVersion,
     },
     { store },
   )
@@ -328,7 +308,11 @@ export async function createDirectBooking(
     const code = created.error?.code
     throw createError({
       statusCode:
-        code === 'PROPERTY_SCOPE' || code === 'CAPABILITY_OFF' ? 403 : 400,
+        code === 'PROPERTY_SCOPE' || code === 'CAPABILITY_OFF'
+          ? 403
+          : code === 'STALE_SNAPSHOT' || code === 'CONFLICT'
+            ? 409
+            : 400,
       statusMessage: created.error?.message ?? 'Direct booking failed',
       data: created,
     })

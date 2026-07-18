@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { buildPrincipal } from '@pms/auth'
 import {
   setCalendarDerivedModifier,
@@ -173,6 +173,33 @@ describe('calendar rate/restriction write flow (U7)', () => {
     })
     expect(res.intent?.lane).toBe('rate_plan')
     expect(sync.domain.ariWriteIntents).toHaveLength(1)
+  })
+
+  it('fail-closed: persist failure removes in-memory intent and returns 503', async () => {
+    const { sync, property } = seedRateCatalog()
+    const prevUrl = process.env.DATABASE_URL
+    process.env.DATABASE_URL = 'postgresql://test/fail-closed'
+    const auth = await import('../../server/utils/auth')
+    const spy = vi.spyOn(auth, 'getDb').mockImplementation(() => {
+      throw new Error('pg down')
+    })
+    try {
+      await expect(
+        setCalendarRestrictions(principal(), {
+          propertyId: property.id,
+          ratePlanChannexId: 'rp-manual',
+          dateFrom: '2026-08-20',
+          dateTo: '2026-08-20',
+          fields: { rateMinor: 22_000 },
+          baseSnapshotVersion: 4,
+        }),
+      ).rejects.toMatchObject({ statusCode: 503 })
+      expect(sync.domain.ariWriteIntents).toHaveLength(0)
+    } finally {
+      spy.mockRestore()
+      if (prevUrl === undefined) delete process.env.DATABASE_URL
+      else process.env.DATABASE_URL = prevUrl
+    }
   })
 })
 

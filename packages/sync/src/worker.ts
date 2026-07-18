@@ -15,6 +15,7 @@ import { detectAriDrift } from './jobs/detect-ari-drift'
 import { runBookingRevisionPull } from './jobs/pull-booking-revisions'
 import { processAckOutbox } from './jobs/process-ack-outbox'
 import { processAriWriteOutbox } from './jobs/process-ari-write-outbox'
+import { processBookingCrsOutbox } from './jobs/process-booking-crs-outbox'
 import { resolveSecret } from './secrets'
 import { createMemorySyncStore, type SyncStore } from './store'
 
@@ -129,7 +130,9 @@ export async function runLocalWorkerCycle(opts: {
     }
     let ariWrite: unknown
     try {
-      ariWrite = await processAriWriteOutbox(store, client, networkId)
+      const lanes = await processAriWriteOutbox(store, client, networkId)
+      const bookingCrs = await processBookingCrsOutbox(store, client, networkId)
+      ariWrite = { ...lanes, bookingCrs }
     } catch (err) {
       ariWrite = {
         skipped: true,

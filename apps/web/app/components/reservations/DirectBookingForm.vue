@@ -31,6 +31,8 @@ const props = defineProps<{
   prefill?: DirectBookingPrefill | null
   /** When false, form CTA stays hidden (AE2). */
   bookingCrsEnabled?: boolean
+  /** Calendar/list snapshot — required for stale-gate on create. */
+  snapshotVersion?: number
   busy?: boolean
   /** Start open (calendar cell create). */
   startOpen?: boolean
@@ -179,6 +181,7 @@ async function submit() {
         roomTypeId: form.roomTypeId,
         ratePlanChannexId: form.ratePlanChannexId,
         days,
+        baseSnapshotVersion: props.snapshotVersion ?? 0,
       },
     })
     open.value = false

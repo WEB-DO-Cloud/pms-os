@@ -211,6 +211,28 @@ describe('setRatePlanRestrictions (U7)', () => {
     expect(store.ariWriteIntents).toHaveLength(0)
   })
 
+  it('ignores mismatched explicit rateMode when catalog says derived', async () => {
+    const store = createMemoryStore()
+    enableRateWrite(store)
+    seedSnapshot(store, 1)
+    seedManualPlan(store)
+    seedDerivedPlan(store)
+    const created = await runCommand(
+      'setRatePlanRestrictions',
+      ctx(principal()),
+      {
+        ...baseRestrictionInput,
+        ratePlanChannexId: 'rp-derived',
+        fields: { rateMinor: 18_000 },
+        rateMode: 'manual',
+      },
+      { store },
+    )
+    expect(created.status).toBe('rejected')
+    expect(created.error?.code).toBe('VALIDATION')
+    expect(store.ariWriteIntents).toHaveLength(0)
+  })
+
   it('rejects non-positive rate and past dates before enqueue', async () => {
     const store = createMemoryStore()
     enableRateWrite(store)
@@ -352,6 +374,26 @@ describe('updateDerivedRateModifier (U7 / AE7)', () => {
       'updateDerivedRateModifier',
       ctx(principal()),
       { ...derivedInput, ratePlanChannexId: 'rp-cascade' },
+      { store },
+    )
+    expect(created.status).toBe('rejected')
+    expect(created.error?.code).toBe('VALIDATION')
+    expect(store.ariWriteIntents).toHaveLength(0)
+  })
+
+  it('ignores mismatched explicit rateMode when catalog is not derived', async () => {
+    const store = createMemoryStore()
+    enableRateWrite(store, true)
+    seedSnapshot(store, 1)
+    seedManualPlan(store)
+    const created = await runCommand(
+      'updateDerivedRateModifier',
+      ctx(principal()),
+      {
+        ...derivedInput,
+        ratePlanChannexId: 'rp-manual',
+        rateMode: 'derived',
+      },
       { store },
     )
     expect(created.status).toBe('rejected')

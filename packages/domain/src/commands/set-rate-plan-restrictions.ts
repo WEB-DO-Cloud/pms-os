@@ -41,8 +41,7 @@ export type SetRatePlanRestrictionsInput = {
   compensatesIntentId?: number | null
   propertyChannexId?: string | null
   /**
-   * When setting rateMinor, caller may pass catalog rate_mode so we fail closed
-   * for derived/inherited plans without a separate lookup.
+   * Fallback only when no catalog plan row exists. Catalog rate_mode always wins.
    */
   rateMode?: string | null
   parentRatePlanChannexId?: string | null
@@ -91,16 +90,22 @@ function rangesOverlap(
   return aFrom <= bTo && bFrom <= aTo
 }
 
-/** Resolve rate_mode from catalog raw attrs or explicit input. */
+/**
+ * Resolve rate_mode. Catalog row wins when present (ignore mismatched explicit).
+ * Explicit is only a fallback when no catalog plan exists.
+ */
 export function resolveRateMode(
   plan: Pick<RatePlanRecord, 'parentRatePlanChannexId' | 'channexRaw'> | null,
   explicit?: string | null,
 ): string {
+  if (plan) {
+    const raw = plan.channexRaw as { rate_mode?: string } | null | undefined
+    if (raw?.rate_mode?.trim()) return raw.rate_mode.trim().toLowerCase()
+    // Fail closed: unknown inheritance → treat as non-manual.
+    if (plan.parentRatePlanChannexId) return 'derived'
+    return 'manual'
+  }
   if (explicit?.trim()) return explicit.trim().toLowerCase()
-  const raw = plan?.channexRaw as { rate_mode?: string } | null | undefined
-  if (raw?.rate_mode?.trim()) return raw.rate_mode.trim().toLowerCase()
-  // Fail closed: unknown inheritance → treat as non-manual.
-  if (plan?.parentRatePlanChannexId) return 'derived'
   return 'manual'
 }
 

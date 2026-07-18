@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { buildPrincipal } from '@pms/auth'
 import { setCalendarAvailability } from '../../server/utils/calendar-availability'
 import { getSyncStore } from '../../server/utils/sync'
@@ -51,7 +51,7 @@ function seedAvailabilityCatalog() {
     {
       networkId: 1,
       propertyId: property.id,
-      roomTypeChannexId: room.channexId,
+      roomTypeId: room.id,
       date: '2026-08-15',
       availability: 2,
       snapshotVersion: 3,
@@ -155,5 +155,35 @@ describe('calendar availability write flow (U6)', () => {
     expect(preview.preview).toBe(true)
     expect(preview.intent).toBeNull()
     expect(sync.domain.ariWriteIntents).toHaveLength(0)
+    expect(preview.currentAvailability).toEqual([
+      { date: '2026-08-15', availability: 2 },
+    ])
+  })
+
+  it('fail-closed: persist failure removes in-memory intent and returns 503', async () => {
+    const { sync, room, property } = seedAvailabilityCatalog()
+    const prevUrl = process.env.DATABASE_URL
+    process.env.DATABASE_URL = 'postgresql://test/fail-closed'
+    const auth = await import('../../server/utils/auth')
+    const spy = vi.spyOn(auth, 'getDb').mockImplementation(() => {
+      throw new Error('pg down')
+    })
+    try {
+      await expect(
+        setCalendarAvailability(principal(), {
+          propertyId: property.id,
+          roomTypeId: room.id,
+          dateFrom: '2026-08-15',
+          dateTo: '2026-08-15',
+          availability: 0,
+          baseSnapshotVersion: 3,
+        }),
+      ).rejects.toMatchObject({ statusCode: 503 })
+      expect(sync.domain.ariWriteIntents).toHaveLength(0)
+    } finally {
+      spy.mockRestore()
+      if (prevUrl === undefined) delete process.env.DATABASE_URL
+      else process.env.DATABASE_URL = prevUrl
+    }
   })
 })

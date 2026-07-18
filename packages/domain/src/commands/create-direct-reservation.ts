@@ -1,5 +1,5 @@
-import { assertCapability, enqueueAriIntent } from '../ari'
-import type { CommandDefinition, ReservationRecord } from '../store'
+import { assertCapability, assertFreshSnapshot, enqueueAriIntent } from '../ari'
+import type { CommandDefinition, DomainStore, ReservationRecord } from '../store'
 
 export type CreateDirectReservationInput = {
   propertyId: number
@@ -18,6 +18,11 @@ export type CreateDirectReservationInput = {
   ratePlanChannexId: string
   /** Nightly prices: YYYY-MM-DD → decimal string ("100.00"). */
   days: Record<string, string>
+  /**
+   * Editor snapshot version. When provided, must match reconciled projection
+   * (required for user/calendar path).
+   */
+  baseSnapshotVersion?: number
 }
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
@@ -48,6 +53,36 @@ export function stayNightDates(checkIn: string, checkOut: string): string[] {
     cursor.setUTCDate(cursor.getUTCDate() + 1)
   }
   return nights
+}
+
+/**
+ * AE5: reject when projected Channex availability for the room type is 0
+ * on any stay night (competing booking / closed inventory).
+ */
+export function assertRoomTypeVacancy(
+  store: Pick<DomainStore, 'ariAvailability'>,
+  networkId: number,
+  propertyId: number,
+  roomTypeId: number,
+  nights: readonly string[],
+): void {
+  for (const night of nights) {
+    const rows = store.ariAvailability.filter(
+      (a) =>
+        a.networkId === networkId &&
+        a.propertyId === propertyId &&
+        a.roomTypeId === roomTypeId &&
+        a.date === night,
+    )
+    if (rows.length === 0) continue
+    const sum = rows.reduce((s, r) => s + r.availability, 0)
+    if (sum === 0 || rows.some((r) => r.availability === 0)) {
+      throw {
+        code: 'CONFLICT',
+        message: `No vacancy for room type on ${night}`,
+      }
+    }
+  }
 }
 
 function assertCrsFields(input: CreateDirectReservationInput): void {
@@ -110,11 +145,22 @@ export const createDirectReservation: CommandDefinition<
     assertCapability(store, ctx.networkId, 'bookingCrsWrite')
     assertCrsFields(input)
 
+    if (input.baseSnapshotVersion !== undefined) {
+      assertFreshSnapshot(store, ctx.networkId, input.baseSnapshotVersion)
+    }
+
     const adults = input.adults ?? 1
     const children = input.children ?? 0
     const infants = input.infants ?? 0
     const guest = splitGuestName(input.guestName)
     const nights = stayNightDates(input.checkInDate, input.checkOutDate)
+    assertRoomTypeVacancy(
+      store,
+      ctx.networkId,
+      input.propertyId,
+      input.roomTypeId,
+      nights,
+    )
     const days: Record<string, string> = {}
     for (const night of nights) days[night] = String(input.days[night])
 
@@ -186,7 +232,8 @@ export const createDirectReservation: CommandDefinition<
         dateFrom: input.checkInDate,
         dateTo: input.checkOutDate,
       },
-      baseSnapshotVersion: null,
+      baseSnapshotVersion:
+        input.baseSnapshotVersion !== undefined ? input.baseSnapshotVersion : null,
       actorPrincipalId: ctx.principal.userId ?? null,
     })
 

@@ -527,6 +527,7 @@ async function deleteNote(note: CalendarNote) {
             :rate-plans="catalogRatePlans"
             :prefill="bookingPrefill"
             :booking-crs-enabled="bookingCrsWrite"
+            :snapshot-version="snapshotVersion"
             start-open
             @created="
               (payload) => {

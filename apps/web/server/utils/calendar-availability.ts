@@ -140,7 +140,7 @@ export async function setCalendarAvailability(
         (a) =>
           a.networkId === networkId &&
           a.propertyId === input.propertyId &&
-          a.roomTypeChannexId === roomType.channexId &&
+          a.roomTypeId === input.roomTypeId &&
           a.date >= input.dateFrom &&
           a.date <= input.dateTo,
       )
@@ -171,8 +171,15 @@ export async function setCalendarAvailability(
       const { persistAriIntent } = await import('../lib/ari-persistence')
       const persisted = await persistAriIntent(getDb(), data.intent)
       data.intent.id = persisted.id
-    } catch {
-      // ponytail: memory remains until PG write-through is required in staging canary.
+    } catch (err) {
+      // Roll back phantom queued state — never report durable without PG.
+      const idx = store.ariWriteIntents.indexOf(data.intent)
+      if (idx >= 0) store.ariWriteIntents.splice(idx, 1)
+      throw createError({
+        statusCode: 503,
+        statusMessage: 'Failed to persist ARI intent',
+        data: { cause: err instanceof Error ? err.message : String(err) },
+      })
     }
   }
 

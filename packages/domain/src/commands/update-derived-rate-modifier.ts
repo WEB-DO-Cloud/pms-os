@@ -44,7 +44,7 @@ export type UpdateDerivedRateModifierInput = {
   baseSnapshotVersion: number
   propertyChannexId?: string | null
   compensatesIntentId?: number | null
-  /** Optional override; normally read from catalog channexRaw. */
+  /** Fallback only when no catalog plan row exists. Catalog rate_mode always wins. */
   rateMode?: string | null
 }
 

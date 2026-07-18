@@ -49,7 +49,7 @@ function seedSnapshot(store: DomainStore, version: number) {
   store.ariAvailability.push({
     networkId: 1,
     propertyId: 10,
-    roomTypeChannexId: 'rt-uuid',
+    roomTypeId: 5,
     date: '2026-08-10',
     availability: 2,
     snapshotVersion: version,
@@ -250,7 +250,7 @@ describe('setRoomTypeAvailability (U6)', () => {
       {
         networkId: 1,
         propertyId: 10,
-        roomTypeChannexId: 'rt-a',
+        roomTypeId: 5,
         date: '2026-08-10',
         availability: 1,
         snapshotVersion: 1,
@@ -259,7 +259,7 @@ describe('setRoomTypeAvailability (U6)', () => {
       {
         networkId: 1,
         propertyId: 20,
-        roomTypeChannexId: 'rt-b',
+        roomTypeId: 6,
         date: '2026-08-10',
         availability: 1,
         snapshotVersion: 1,

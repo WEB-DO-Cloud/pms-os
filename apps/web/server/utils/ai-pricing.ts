@@ -62,8 +62,11 @@ function throwHttp(
 }
 
 async function persistIntentIfNeeded(
+  store: { ariWriteIntents: SetRatePlanNightlyRatesResult['intent'][] },
   intent: SetRatePlanNightlyRatesResult['intent'],
   idempotentReplay: boolean | undefined,
+  /** Intents enqueued for this apply — all removed if PG persist fails. */
+  rollbackIntents: SetRatePlanNightlyRatesResult['intent'][],
 ) {
   if (!process.env.DATABASE_URL || idempotentReplay) return intent
   try {
@@ -71,8 +74,17 @@ async function persistIntentIfNeeded(
     const { persistAriIntent } = await import('../lib/ari-persistence')
     const persisted = await persistAriIntent(getDb(), intent)
     intent.id = persisted.id
-  } catch {
-    // ponytail: memory remains until PG write-through is required in staging canary.
+  } catch (err) {
+    // Roll back phantom queued state — never report durable without PG.
+    for (const i of rollbackIntents) {
+      const idx = store.ariWriteIntents.indexOf(i)
+      if (idx >= 0) store.ariWriteIntents.splice(idx, 1)
+    }
+    throw createError({
+      statusCode: 503,
+      statusMessage: 'Failed to persist ARI intent',
+      data: { cause: err instanceof Error ? err.message : String(err) },
+    })
   }
   return intent
 }
@@ -176,6 +188,7 @@ export async function acceptPricingProposal(
 
   const sync = getSyncStore(input.networkId)
   const outcomes: PricingApplyRowResult[] = []
+  const appliedIntents: SetRatePlanNightlyRatesResult['intent'][] = []
 
   for (const i of indexes) {
     const item = parsed.suggestions[i]
@@ -238,7 +251,13 @@ export async function acceptPricingProposal(
     }
 
     const data = result.data as SetRatePlanNightlyRatesResult
-    await persistIntentIfNeeded(data.intent, result.idempotentReplay)
+    appliedIntents.push(data.intent)
+    await persistIntentIfNeeded(
+      store,
+      data.intent,
+      result.idempotentReplay,
+      appliedIntents,
+    )
     outcomes.push({
       index: i,
       status: 'queued',

@@ -20,6 +20,7 @@ const catalogRatePlans = ref<
   }[]
 >([])
 const bookingCrsWrite = ref(false)
+const snapshotVersion = ref(0)
 const freshness = ref<{ status: string; updatedAt: string } | null>(null)
 const error = ref<string | null>(null)
 const flash = ref<string | null>(null)
@@ -50,6 +51,7 @@ async function load() {
         currency: string | null
       }[]
       capabilities?: { bookingCrsWrite: boolean }
+      snapshotVersion?: number
     }>('/api/reservations', {
       query: {
         networkId: currentNetworkId.value,
@@ -63,6 +65,7 @@ async function load() {
     catalogRoomTypes.value = res.roomTypes ?? []
     catalogRatePlans.value = res.ratePlans ?? []
     bookingCrsWrite.value = Boolean(res.capabilities?.bookingCrsWrite)
+    snapshotVersion.value = res.snapshotVersion ?? 0
   } catch (err: unknown) {
     const e = err as { data?: { statusMessage?: string }; statusMessage?: string; message?: string }
     error.value =
@@ -132,6 +135,7 @@ watch([currentNetworkId, propertyFilter, statusFilter], () => {
         :room-types="catalogRoomTypes"
         :rate-plans="catalogRatePlans"
         :booking-crs-enabled="bookingCrsWrite"
+        :snapshot-version="snapshotVersion"
         :busy="loading"
         @created="onCreated"
         @error="(msg) => (error = msg)"
