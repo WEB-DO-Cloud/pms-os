@@ -78,6 +78,16 @@ import {
   updateRule,
 } from './automation'
 import { assignPhysicalRoom, staysOverlap } from './assign-physical-room'
+import {
+  assertCapability,
+  assertFreshSnapshot,
+  assertValidDateRange,
+  cancelQueuedIntent,
+  currentSnapshotVersion,
+  enqueueAriIntent,
+  propertyLocalToday,
+} from './ari'
+import { CAPABILITY_KEYS, getNetworkCapabilities } from './store'
 
 export const packageName = '@pms/domain' as const
 
@@ -128,6 +138,16 @@ export {
   // physical room assignment
   assignPhysicalRoom,
   staysOverlap,
+  // ARI write foundation (calendar ARI editor U1)
+  assertCapability,
+  assertFreshSnapshot,
+  assertValidDateRange,
+  cancelQueuedIntent,
+  currentSnapshotVersion,
+  enqueueAriIntent,
+  propertyLocalToday,
+  getNetworkCapabilities,
+  CAPABILITY_KEYS,
 }
 
 export type {
@@ -164,6 +184,18 @@ export type {
   TaskStatus,
   LedgerType,
 }
+export type {
+  AriAvailabilityRecord,
+  AriRestrictionRecord,
+  AriWriteIntentRecord,
+  AriWriteLane,
+  AriWriteStatus,
+  CalendarNoteRecord,
+  CapabilityKey,
+  NetworkCapabilityRecord,
+  RatePlanRecord,
+} from './store'
+export type { EnqueueAriIntentInput } from './ari'
 export type {
   AutomationTrigger,
   AutomationCondition,

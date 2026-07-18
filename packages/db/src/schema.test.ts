@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
   ackOutbox,
+  ariAvailability,
+  ariRestrictions,
+  ariWriteIntents,
   bookingRevisions,
+  calendarNotes,
   fieldOwnership,
+  networkCapabilities,
   networks,
   ownerProperties,
   paymentLedger,
@@ -60,6 +65,75 @@ describe('db schema invariants', () => {
     expect(fieldOwnership.reservations.channexOwned).toContain('roomTypeId')
     expect(fieldOwnership.physicalRooms.pmsOwned).toContain('label')
     expect(fieldOwnership.guests.pmsOwned).toContain('vip')
+  })
+
+  it('normalizes ARI projections per room-type/date and rate-plan/date', () => {
+    expect(uniqueNames(ariAvailability)).toContain('ari_availability_room_type_date_uidx')
+    expect(uniqueNames(ariRestrictions)).toContain('ari_restrictions_plan_date_uidx')
+    const availCols = Object.fromEntries(
+      getTableConfig(ariAvailability).columns.map((c) => [c.name, c]),
+    )
+    expect(availCols.date.getSQLType()).toBe('text')
+    expect(availCols.snapshot_version).toBeDefined()
+    const restCols = Object.fromEntries(
+      getTableConfig(ariRestrictions).columns.map((c) => [c.name, c]),
+    )
+    expect(restCols.rate_minor.getSQLType()).toContain('integer')
+    expect(restCols.stop_sell).toBeDefined()
+    expect(restCols.min_stay_arrival).toBeDefined()
+  })
+
+  it('external-write outbox is idempotent per network and carries lifecycle metadata', () => {
+    expect(uniqueNames(ariWriteIntents)).toContain('ari_write_intents_idempotency_uidx')
+    const cols = Object.fromEntries(
+      getTableConfig(ariWriteIntents).columns.map((c) => [c.name, c]),
+    )
+    expect(cols.status.enumValues).toEqual(
+      expect.arrayContaining([
+        'queued',
+        'sending',
+        'accepted',
+        'partial',
+        'retry',
+        'reconciling',
+        'reconciled',
+        'drifted',
+        'failed',
+        'cancelled',
+      ]),
+    )
+    expect(cols.lane.enumValues).toEqual(
+      expect.arrayContaining(['availability', 'restrictions', 'rate_plan', 'booking_crs']),
+    )
+    expect(cols.payload.notNull).toBe(true)
+    expect(cols.base_snapshot_version).toBeDefined()
+    expect(cols.warnings).toBeDefined()
+    expect(cols.compensates_intent_id).toBeDefined()
+  })
+
+  it('capability gates default every write class off', () => {
+    const cols = Object.fromEntries(
+      getTableConfig(networkCapabilities).columns.map((c) => [c.name, c]),
+    )
+    for (const name of [
+      'booking_crs_write',
+      'availability_write',
+      'rate_restriction_write',
+      'derived_rate_write',
+      'ai_apply',
+    ]) {
+      expect(cols[name]?.default).toBe(false)
+      expect(cols[name]?.notNull).toBe(true)
+    }
+    expect(uniqueNames(networkCapabilities)).toContain('network_capabilities_network_uidx')
+  })
+
+  it('calendar notes are property/date scoped PMS-owned rows', () => {
+    const cols = Object.fromEntries(
+      getTableConfig(calendarNotes).columns.map((c) => [c.name, c]),
+    )
+    expect(cols.date.getSQLType()).toBe('text')
+    expect(cols.body.notNull).toBe(true)
   })
 
   it('requires network slug uniqueness', () => {

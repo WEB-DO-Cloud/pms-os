@@ -39,6 +39,12 @@ export const PRIVILEGED_ACTIONS = [
   'automation_approval',
   'owner_apis',
   'settings_security',
+  /** Availability, rate, restriction, derived-modifier, and Booking CRS writes. */
+  'ari_write',
+  /** Approving AI proposals into external write commands. */
+  'ai_apply',
+  /** Toggling per-network write capability gates. */
+  'capability_admin',
 ] as const
 
 export type PrivilegedAction = (typeof PRIVILEGED_ACTIONS)[number]
@@ -85,8 +91,17 @@ const ACTION_MATRIX: Record<MemberRole, readonly PrivilegedAction[]> = {
     'licensing',
     'automation_approval',
     'settings_security',
+    'ari_write',
+    'ai_apply',
+    'capability_admin',
   ],
-  manager: ['integrations', 'automation_approval', 'settings_security'],
+  manager: [
+    'integrations',
+    'automation_approval',
+    'settings_security',
+    'ari_write',
+    'ai_apply',
+  ],
   front_desk: [],
   housekeeping: [],
   accounting: [],

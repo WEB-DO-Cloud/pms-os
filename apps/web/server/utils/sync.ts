@@ -73,6 +73,17 @@ export async function ensureSecretsHydrated(networkId: number): Promise<SyncStor
     // optional
   }
 
+  // Durable ARI state (capabilities, write intents, projections, notes) — the
+  // memory store is a cache; PG rows survive restarts (R15).
+  if (process.env.DATABASE_URL) {
+    try {
+      const { hydrateAriState } = await import('../lib/ari-persistence')
+      await hydrateAriState(getDb(), store.domain, networkId)
+    } catch {
+      // Missing migration / unit tests without PG — memory-only still works.
+    }
+  }
+
   hydrated.add(networkId)
 
   // Self-heal the catalog: the memory store starts empty after every restart,

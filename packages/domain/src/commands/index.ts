@@ -12,6 +12,7 @@ import { updateGuestEnrichment } from './update-guest-enrichment'
 import { updatePropertyOps } from './update-property-ops'
 import { importLocalReviews } from './import-local-reviews'
 import { updateReviewStatus } from './update-review-status'
+import { setNetworkCapability } from './set-network-capability'
 import type { AnyCommandDefinition } from '../store'
 
 export const commandRegistry = {
@@ -29,6 +30,7 @@ export const commandRegistry = {
   updatePropertyOps,
   importLocalReviews,
   updateReviewStatus,
+  setNetworkCapability,
 } as const satisfies Record<string, AnyCommandDefinition>
 
 export type CommandName = keyof typeof commandRegistry
@@ -48,6 +50,7 @@ export type CommandInputMap = {
   updatePropertyOps: import('./update-property-ops').UpdatePropertyOpsInput
   importLocalReviews: import('./import-local-reviews').ImportLocalReviewsInput
   updateReviewStatus: import('./update-review-status').UpdateReviewStatusInput
+  setNetworkCapability: import('./set-network-capability').SetNetworkCapabilityInput
 }
 
 export type CommandOutputMap = {
@@ -65,6 +68,7 @@ export type CommandOutputMap = {
   updatePropertyOps: import('../store').PropertyOpsRecord
   importLocalReviews: { imported: number; reviews: import('../store').ReviewRecord[] }
   updateReviewStatus: import('../store').ReviewRecord
+  setNetworkCapability: import('../store').NetworkCapabilityRecord
 }
 
 export {
@@ -82,6 +86,7 @@ export {
   updatePropertyOps,
   importLocalReviews,
   updateReviewStatus,
+  setNetworkCapability,
 }
 
 export type { ApplyChannexBookingRevisionInput } from './apply-channex-booking-revision'

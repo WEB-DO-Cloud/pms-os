@@ -185,6 +185,149 @@ export type ConversationReadRecord = {
   lastReadAt: string
 }
 
+/** Live Channex room-type availability projection (KTD2). */
+export type AriAvailabilityRecord = {
+  networkId: number
+  propertyId: number
+  roomTypeId: number
+  /** Property-local calendar date (YYYY-MM-DD). */
+  date: string
+  availability: number
+  snapshotVersion: number
+  pulledAt: string
+}
+
+/** Live Channex rate-plan rate/restriction projection (KTD2). */
+export type AriRestrictionRecord = {
+  networkId: number
+  propertyId: number
+  ratePlanChannexId: string
+  date: string
+  rateMinor: number | null
+  minStayArrival: number | null
+  minStayThrough: number | null
+  maxStay: number | null
+  closedToArrival: boolean | null
+  closedToDeparture: boolean | null
+  stopSell: boolean | null
+  snapshotVersion: number
+  pulledAt: string
+}
+
+/** Channex rate-plan catalog row (rate plans stay Channex-scoped; no local serial). */
+export type RatePlanRecord = {
+  networkId: number
+  propertyId: number
+  channexId: string
+  roomTypeChannexId: string | null
+  title: string
+  currency: string | null
+  /** Parent plan Channex ID when this plan is derived. */
+  parentRatePlanChannexId: string | null
+  /** Supported derived modifiers raw from Channex (e.g. increase_by_percent). */
+  channexRaw: unknown
+  pulledAt: string
+}
+
+/** PMS-owned lightweight note on a property-local calendar date (R8). */
+export type CalendarNoteRecord = {
+  id: number
+  networkId: number
+  propertyId: number
+  date: string
+  body: string
+  createdByUserId: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type AriWriteLane =
+  | 'availability'
+  | 'restrictions'
+  | 'rate_plan'
+  | 'booking_crs'
+
+export type AriWriteStatus =
+  | 'queued'
+  | 'sending'
+  | 'accepted'
+  | 'partial'
+  | 'retry'
+  | 'reconciling'
+  | 'reconciled'
+  | 'drifted'
+  | 'failed'
+  | 'cancelled'
+
+/** Durable absolute desired-state external write intent (KTD3). */
+export type AriWriteIntentRecord = {
+  id: number
+  networkId: number
+  propertyId: number
+  lane: AriWriteLane
+  idempotencyKey: string
+  /** Absolute payload sent to Channex (values array or booking body). */
+  payload: unknown
+  /** Resource scope for reconciliation: Channex IDs + date range. */
+  resourceScope: {
+    roomTypeChannexId?: string
+    ratePlanChannexId?: string
+    dateFrom: string
+    dateTo: string
+  } | null
+  baseSnapshotVersion: number | null
+  status: AriWriteStatus
+  channexTaskIds: string[]
+  warnings: unknown[]
+  attempts: number
+  lastError: string | null
+  nextAttemptAt: string | null
+  actorPrincipalId: string | null
+  approvedByPrincipalId: string | null
+  compensatesIntentId: number | null
+  reconciledAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export const CAPABILITY_KEYS = [
+  'bookingCrsWrite',
+  'availabilityWrite',
+  'rateRestrictionWrite',
+  'derivedRateWrite',
+  'aiApply',
+] as const
+
+export type CapabilityKey = (typeof CAPABILITY_KEYS)[number]
+
+/** Per-network operational write gates (KTD7) — every class defaults off. */
+export type NetworkCapabilityRecord = {
+  networkId: number
+  bookingCrsWrite: boolean
+  availabilityWrite: boolean
+  rateRestrictionWrite: boolean
+  derivedRateWrite: boolean
+  aiApply: boolean
+  updatedAt: string
+}
+
+export function getNetworkCapabilities(
+  store: Pick<DomainStore, 'networkCapabilities'>,
+  networkId: number,
+): NetworkCapabilityRecord {
+  return (
+    store.networkCapabilities.find((c) => c.networkId === networkId) ?? {
+      networkId,
+      bookingCrsWrite: false,
+      availabilityWrite: false,
+      rateRestrictionWrite: false,
+      derivedRateWrite: false,
+      aiApply: false,
+      updatedAt: new Date(0).toISOString(),
+    }
+  )
+}
+
 export type PendingApprovalRecord = {
   id: string
   networkId: number
@@ -214,6 +357,12 @@ export type DomainStore = {
   channelMessages: ChannelMessageRecord[]
   /** ponytail: process-local read markers; persist in PG when chat storage becomes durable. */
   conversationReads: ConversationReadRecord[]
+  ariAvailability: AriAvailabilityRecord[]
+  ariRestrictions: AriRestrictionRecord[]
+  ratePlans: RatePlanRecord[]
+  calendarNotes: CalendarNoteRecord[]
+  ariWriteIntents: AriWriteIntentRecord[]
+  networkCapabilities: NetworkCapabilityRecord[]
   guests: GuestRecord[]
   reviews: ReviewRecord[]
   propertyOps: PropertyOpsRecord[]
@@ -236,6 +385,12 @@ export function createMemoryStore(): DomainStore {
     outboundMessages: [],
     channelMessages: [],
     conversationReads: [],
+    ariAvailability: [],
+    ariRestrictions: [],
+    ratePlans: [],
+    calendarNotes: [],
+    ariWriteIntents: [],
+    networkCapabilities: [],
     guests: [],
     reviews: [],
     propertyOps: [],

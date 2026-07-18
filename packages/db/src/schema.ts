@@ -64,6 +64,26 @@ export const paymentLedgerTypeEnum = pgEnum('payment_ledger_type', [
   'receipt',
 ])
 
+export const ariWriteStatusEnum = pgEnum('ari_write_status', [
+  'queued',
+  'sending',
+  'accepted',
+  'partial',
+  'retry',
+  'reconciling',
+  'reconciled',
+  'drifted',
+  'failed',
+  'cancelled',
+])
+
+export const ariWriteLaneEnum = pgEnum('ari_write_lane', [
+  'availability',
+  'restrictions',
+  'rate_plan',
+  'booking_crs',
+])
+
 export const roleEnum = pgEnum('member_role', [
   'org_admin',
   'manager',
@@ -640,6 +660,151 @@ export const auditEvents = pgTable(
   (t) => [
     index('audit_events_network_idx').on(t.networkId),
     index('audit_events_created_idx').on(t.createdAt),
+  ],
+)
+
+/** Live Channex room-type availability projection (one row per network/room-type/date). */
+export const ariAvailability = pgTable(
+  'ari_availability',
+  {
+    id: serial('id').primaryKey(),
+    networkId: integer('network_id')
+      .notNull()
+      .references(() => networks.id, { onDelete: 'cascade' }),
+    propertyId: integer('property_id')
+      .notNull()
+      .references(() => properties.id, { onDelete: 'cascade' }),
+    roomTypeId: integer('room_type_id')
+      .notNull()
+      .references(() => roomTypes.id, { onDelete: 'cascade' }),
+    /** Property-local calendar date (YYYY-MM-DD). */
+    date: text('date').notNull(),
+    availability: integer('availability').notNull(),
+    /** Monotonic per-network snapshot version; bumps only when values change. */
+    snapshotVersion: integer('snapshot_version').notNull(),
+    pulledAt: timestamp('pulled_at', { withTimezone: true }).notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex('ari_availability_room_type_date_uidx').on(t.roomTypeId, t.date),
+    index('ari_availability_property_date_idx').on(t.propertyId, t.date),
+  ],
+)
+
+/** Live Channex rate-plan rate/restriction projection (one row per rate-plan/date). */
+export const ariRestrictions = pgTable(
+  'ari_restrictions',
+  {
+    id: serial('id').primaryKey(),
+    networkId: integer('network_id')
+      .notNull()
+      .references(() => networks.id, { onDelete: 'cascade' }),
+    propertyId: integer('property_id')
+      .notNull()
+      .references(() => properties.id, { onDelete: 'cascade' }),
+    /** Channex rate-plan UUID (rate plans have no local table). */
+    ratePlanChannexId: text('rate_plan_channex_id').notNull(),
+    date: text('date').notNull(),
+    /** Nightly rate in minor units; null when Channex omitted it. */
+    rateMinor: integer('rate_minor'),
+    minStayArrival: integer('min_stay_arrival'),
+    minStayThrough: integer('min_stay_through'),
+    maxStay: integer('max_stay'),
+    closedToArrival: boolean('closed_to_arrival'),
+    closedToDeparture: boolean('closed_to_departure'),
+    stopSell: boolean('stop_sell'),
+    snapshotVersion: integer('snapshot_version').notNull(),
+    pulledAt: timestamp('pulled_at', { withTimezone: true }).notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex('ari_restrictions_plan_date_uidx').on(t.ratePlanChannexId, t.date),
+    index('ari_restrictions_property_date_idx').on(t.propertyId, t.date),
+  ],
+)
+
+/** PMS-owned lightweight calendar note on a property-local date. */
+export const calendarNotes = pgTable(
+  'calendar_notes',
+  {
+    id: serial('id').primaryKey(),
+    networkId: integer('network_id')
+      .notNull()
+      .references(() => networks.id, { onDelete: 'cascade' }),
+    propertyId: integer('property_id')
+      .notNull()
+      .references(() => properties.id, { onDelete: 'cascade' }),
+    date: text('date').notNull(),
+    body: text('body').notNull(),
+    createdByUserId: text('created_by_user_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index('calendar_notes_property_date_idx').on(t.propertyId, t.date)],
+)
+
+/**
+ * Per-network operational write capability gates (KTD7). Operational, not licensing;
+ * every write class defaults off.
+ */
+export const networkCapabilities = pgTable(
+  'network_capabilities',
+  {
+    id: serial('id').primaryKey(),
+    networkId: integer('network_id')
+      .notNull()
+      .references(() => networks.id, { onDelete: 'cascade' }),
+    bookingCrsWrite: boolean('booking_crs_write').default(false).notNull(),
+    availabilityWrite: boolean('availability_write').default(false).notNull(),
+    rateRestrictionWrite: boolean('rate_restriction_write').default(false).notNull(),
+    derivedRateWrite: boolean('derived_rate_write').default(false).notNull(),
+    aiApply: boolean('ai_apply').default(false).notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [uniqueIndex('network_capabilities_network_uidx').on(t.networkId)],
+)
+
+/**
+ * Transactional external-write outbox (KTD3). Absolute desired-state intents;
+ * one row per property/lane write, durable before any Channex request.
+ */
+export const ariWriteIntents = pgTable(
+  'ari_write_intents',
+  {
+    id: serial('id').primaryKey(),
+    networkId: integer('network_id')
+      .notNull()
+      .references(() => networks.id, { onDelete: 'cascade' }),
+    propertyId: integer('property_id')
+      .notNull()
+      .references(() => properties.id, { onDelete: 'cascade' }),
+    lane: ariWriteLaneEnum('lane').notNull(),
+    /** Command-level idempotency key — one logical write, one row. */
+    idempotencyKey: text('idempotency_key').notNull(),
+    /** Absolute desired payload sent to Channex (values array or booking body). */
+    payload: jsonb('payload').notNull(),
+    /** Resource scope for reconciliation (room type / rate plan Channex IDs + dates). */
+    resourceScope: jsonb('resource_scope'),
+    /** Snapshot version the editor based this intent on (stale check). */
+    baseSnapshotVersion: integer('base_snapshot_version'),
+    status: ariWriteStatusEnum('status').default('queued').notNull(),
+    channexTaskIds: jsonb('channex_task_ids'),
+    warnings: jsonb('warnings'),
+    attempts: integer('attempts').default(0).notNull(),
+    lastError: text('last_error'),
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }),
+    actorPrincipalId: text('actor_principal_id'),
+    approvedByPrincipalId: text('approved_by_principal_id'),
+    /** Intent this row compensates (reversal by new absolute write, KTD14). */
+    compensatesIntentId: integer('compensates_intent_id'),
+    reconciledAt: timestamp('reconciled_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [
+    uniqueIndex('ari_write_intents_idempotency_uidx').on(t.networkId, t.idempotencyKey),
+    index('ari_write_intents_status_idx').on(t.status),
+    index('ari_write_intents_property_lane_idx').on(t.propertyId, t.lane),
   ],
 )
 
