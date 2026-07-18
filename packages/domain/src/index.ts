@@ -210,6 +210,15 @@ export type { ApplyChannexBookingRevisionInput } from './commands'
 export type {
   SetRoomTypeAvailabilityInput,
   SetRoomTypeAvailabilityResult,
+  RatePlanRestrictionFields,
+  SetRatePlanRestrictionsInput,
+  SetRatePlanRestrictionsResult,
+  SetRatePlanNightlyRatesInput,
+  SetRatePlanNightlyRatesResult,
+  DerivedOptionPayload,
+  DerivedRateOp,
+  UpdateDerivedRateModifierInput,
+  UpdateDerivedRateModifierResult,
 } from './commands'
 export {
   offlineReservationCode,
@@ -221,6 +230,18 @@ export {
   availabilityIdempotencyKey,
   supersedeOverlappingQueuedAvailability,
 } from './commands/set-room-type-availability'
+export {
+  assertNightlyRateEditable,
+  resolveRateMode,
+  restrictionsIdempotencyKey,
+  supersedeOverlappingQueuedRestrictions,
+} from './commands/set-rate-plan-restrictions'
+export {
+  assertDerivedRateEditable,
+  DERIVED_RATE_OPS,
+  derivedModifierIdempotencyKey,
+  supersedeQueuedDerivedModifier,
+} from './commands/update-derived-rate-modifier'
 export type {
   ReportSummary,
   ReportFilters,

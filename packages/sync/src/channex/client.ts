@@ -14,8 +14,11 @@ import type {
   ChannexMessageThreadAttrs,
   ChannexPropertyAttrs,
   ChannexRatePlanAttrs,
+  ChannexRatePlanUpdateBody,
   ChannexResource,
   ChannexRestrictionsResponse,
+  ChannexRestrictionsUpdateResponse,
+  ChannexRestrictionUpdateValue,
   ChannexRoomTypeAttrs,
 } from './types'
 
@@ -179,6 +182,17 @@ export function createChannexClient(opts: ChannexClientOptions) {
       )
     },
 
+    /**
+     * ARI write: absolute rate / restriction values.
+     * Prefer integer minor units for `rate`. HTTP 200 + meta.warnings = partial (AE4).
+     */
+    updateRestrictions(values: ChannexRestrictionUpdateValue[]) {
+      return request<ChannexRestrictionsUpdateResponse>('/restrictions', {
+        method: 'POST',
+        body: JSON.stringify({ values }),
+      })
+    },
+
     createRatePlan(input: ChannexCreateRatePlanInput) {
       return request<{ data: ChannexResource<ChannexRatePlanAttrs> }>('/rate_plans', {
         method: 'POST',
@@ -190,6 +204,26 @@ export function createChannexClient(opts: ChannexClientOptions) {
           },
         }),
       })
+    },
+
+    getRatePlan(ratePlanId: string) {
+      return request<{ data: ChannexResource<ChannexRatePlanAttrs> }>(
+        `/rate_plans/${encodeURIComponent(ratePlanId)}`,
+      )
+    },
+
+    /**
+     * Update a rate plan (derived_option modifiers, etc.).
+     * Callers must only send documented fields — fail closed upstream for unproven modes.
+     */
+    updateRatePlan(ratePlanId: string, body: ChannexRatePlanUpdateBody) {
+      return request<{ data: ChannexResource<ChannexRatePlanAttrs> }>(
+        `/rate_plans/${encodeURIComponent(ratePlanId)}`,
+        {
+          method: 'PUT',
+          body: JSON.stringify({ rate_plan: body }),
+        },
+      )
     },
 
     /**

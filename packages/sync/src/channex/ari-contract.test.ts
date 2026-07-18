@@ -86,4 +86,21 @@ describe.skipIf(!enabled)('Channex sandbox ARI contract', () => {
       expect(Array.isArray(res.meta.warnings)).toBe(true)
     }
   })
+
+  it.skip('POST /restrictions accepts absolute rate/restriction values', async () => {
+    const plans = await client.listRatePlans(propertyId!)
+    const planId = plans.data[0]?.id
+    expect(planId).toBeTruthy()
+    const date = isoDatePlusDays(21)
+    const res = await client.updateRestrictions([
+      {
+        property_id: propertyId!,
+        rate_plan_id: planId!,
+        date,
+        rate: 20000,
+        min_stay_arrival: 1,
+      },
+    ])
+    expect(res).toBeTypeOf('object')
+  })
 })

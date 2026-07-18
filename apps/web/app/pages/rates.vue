@@ -22,7 +22,13 @@ const freshness = ref<{
   stale: boolean
   staleReason: string | null
 } | null>(null)
-const meta = ref({ managedInChannex: true, readOnly: true, ariWriteEnabled: false })
+const meta = ref({
+  managedInChannex: true,
+  readOnly: true,
+  ariWriteEnabled: false,
+  rateRestrictionWrite: false,
+  derivedRateWrite: false,
+})
 const error = ref<string | null>(null)
 const loading = ref(false)
 
@@ -42,6 +48,8 @@ async function load() {
       managedInChannex: boolean
       readOnly: boolean
       ariWriteEnabled: boolean
+      rateRestrictionWrite?: boolean
+      derivedRateWrite?: boolean
     }>('/api/rates', {
       query: { networkId: currentNetworkId.value },
     })
@@ -51,6 +59,8 @@ async function load() {
       managedInChannex: res.managedInChannex,
       readOnly: res.readOnly,
       ariWriteEnabled: res.ariWriteEnabled,
+      rateRestrictionWrite: Boolean(res.rateRestrictionWrite),
+      derivedRateWrite: Boolean(res.derivedRateWrite),
     }
   } catch (err: unknown) {
     const e = err as { data?: { statusMessage?: string }; statusMessage?: string; message?: string }
@@ -144,8 +154,8 @@ watch(currentNetworkId, () => {
         <p class="eyebrow">Channex managed</p>
         <h1>Rates</h1>
         <p class="page-intro">
-          Read-only rate and restriction context from the cached ARI snapshot. Availability
-          write-back is not enabled in v1.
+          Rate and restriction context from the cached Channex ARI snapshot. Nightly
+          edits apply only to parent/manual plans; channel mappings stay in Channex.
         </p>
       </div>
     </header>
@@ -153,8 +163,12 @@ watch(currentNetworkId, () => {
     <div class="section-rule" />
 
     <p class="banner" role="status">
-      Managed in Channex · read-only
+      Managed in Channex
+      <template v-if="meta.readOnly"> · read-only</template>
+      <template v-else> · write capabilities enabled</template>
       <template v-if="!meta.ariWriteEnabled"> · ARI write disabled</template>
+      <template v-else-if="meta.rateRestrictionWrite"> · rates/restrictions</template>
+      <template v-if="meta.derivedRateWrite"> · derived modifiers</template>
     </p>
 
     <p v-if="freshness" class="freshness" :class="{ stale: freshness.stale }">

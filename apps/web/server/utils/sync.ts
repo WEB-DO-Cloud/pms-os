@@ -316,7 +316,11 @@ export async function runInternalAriWrite(networkId: number) {
     try {
       const { persistAriIntentStatus } = await import('../lib/ari-persistence')
       for (const intent of store.domain.ariWriteIntents.filter(
-        (i) => i.networkId === networkId && i.lane === 'availability',
+        (i) =>
+          i.networkId === networkId &&
+          (i.lane === 'availability' ||
+            i.lane === 'restrictions' ||
+            i.lane === 'rate_plan'),
       )) {
         await persistAriIntentStatus(getDb(), intent)
       }

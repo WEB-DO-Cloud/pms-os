@@ -72,6 +72,8 @@ describe('revenue web: rates read-only projection', () => {
     expect(model.readOnly).toBe(true)
     expect(model.managedInChannex).toBe(true)
     expect(model.ariWriteEnabled).toBe(false)
+    expect(model.rateRestrictionWrite).toBe(false)
+    expect(model.derivedRateWrite).toBe(false)
     expect(model.freshness.stale).toBe(false)
     expect(model.plans.some((p) => p.propertyId === 10 && p.state === 'cached')).toBe(
       true,

@@ -90,6 +90,12 @@ export type ChannexRatePlanAttrs = {
   rate_mode?: string
   parent_rate_plan_id?: string | null
   auto_rate_settings?: unknown
+  options?: Array<{
+    occupancy: number
+    is_primary?: boolean
+    rate?: number
+    derived_option?: { rate: [string, string][] } | null
+  }>
 }
 
 /** GET /availability — data is a plain map: room type ID → date → count. */
@@ -131,6 +137,48 @@ export type ChannexRestrictionValues = {
 /** GET /restrictions — data is a plain map: rate plan ID → date → values. */
 export type ChannexRestrictionsResponse = {
   data: Record<string, Record<string, ChannexRestrictionValues>>
+}
+
+/** One row in POST /restrictions `{ values: [...] }`. Rate as integer minor units. */
+export type ChannexRestrictionUpdateValue = {
+  property_id: string
+  rate_plan_id: string
+  date?: string
+  date_from?: string
+  date_to?: string
+  rate?: number | string
+  min_stay_arrival?: number
+  min_stay_through?: number
+  max_stay?: number
+  closed_to_arrival?: boolean
+  closed_to_departure?: boolean
+  stop_sell?: boolean
+}
+
+/** POST /restrictions — HTTP 200 may still carry meta.warnings (AE4). */
+export type ChannexRestrictionsUpdateResponse = {
+  data?: Array<{ id?: string; type?: string } | string>
+  meta?: {
+    message?: string
+    task_id?: string
+    warnings?: unknown[]
+  }
+}
+
+/** Documented derived_option.rate rule: [op, argument]. */
+export type ChannexDerivedRateRule = [string, string]
+
+export type ChannexRatePlanUpdateBody = {
+  title?: string
+  options?: Array<{
+    occupancy: number
+    is_primary?: boolean
+    rate?: number
+    derived_option?: { rate: ChannexDerivedRateRule[] } | null
+  }>
+  rate_mode?: string
+  parent_rate_plan_id?: string | null
+  [key: string]: unknown
 }
 
 export type ChannexBookingRevisionAttrs = {

@@ -11,6 +11,7 @@ import type {
   CellMenuAction,
   CellMenuContext,
 } from '~/components/calendar/CalendarCellMenu.vue'
+import CalendarAriDrawer from '~/components/calendar/CalendarAriDrawer.vue'
 
 const { currentNetworkId, properties: shellProperties } = useCurrentNetwork()
 
@@ -87,8 +88,15 @@ async function load() {
         title: string
         roomTypeChannexId: string | null
         currency: string | null
+        rateMode?: string | null
+        parentRatePlanChannexId?: string | null
       }[]
-      capabilities?: { bookingCrsWrite: boolean; availabilityWrite?: boolean }
+      capabilities?: {
+        bookingCrsWrite: boolean
+        availabilityWrite?: boolean
+        rateRestrictionWrite?: boolean
+        derivedRateWrite?: boolean
+      }
       snapshotVersion?: number
     }>('/api/reservations', {
       query: {
@@ -108,6 +116,8 @@ async function load() {
     catalogRatePlans.value = res.ratePlans ?? []
     bookingCrsWrite.value = Boolean(res.capabilities?.bookingCrsWrite)
     availabilityWrite.value = Boolean(res.capabilities?.availabilityWrite)
+    rateRestrictionWrite.value = Boolean(res.capabilities?.rateRestrictionWrite)
+    derivedRateWrite.value = Boolean(res.capabilities?.derivedRateWrite)
     snapshotVersion.value = res.snapshotVersion ?? 0
   } catch (err: unknown) {
     const e = err as { data?: { statusMessage?: string }; statusMessage?: string; message?: string }
@@ -171,6 +181,8 @@ const dayBusy = ref(false)
 const dayError = ref<string | null>(null)
 const bookingCrsWrite = ref(false)
 const availabilityWrite = ref(false)
+const rateRestrictionWrite = ref(false)
+const derivedRateWrite = ref(false)
 const snapshotVersion = ref(0)
 const catalogRoomTypes = ref<
   { id: number; propertyId: number; name: string; channexId: string }[]
@@ -182,6 +194,8 @@ const catalogRatePlans = ref<
     title: string
     roomTypeChannexId: string | null
     currency: string | null
+    rateMode?: string | null
+    parentRatePlanChannexId?: string | null
   }[]
 >([])
 const bookingPrefill = ref<{
@@ -190,6 +204,7 @@ const bookingPrefill = ref<{
   rateMinor: number | null
 } | null>(null)
 const availabilityBusy = ref(false)
+const ariDrawerCtx = ref<CellMenuContext | null>(null)
 
 function notesFor(ctx: CellMenuContext) {
   return notes.value.filter(
@@ -246,6 +261,22 @@ function buildCellActions(ctx: CellMenuContext): CellMenuAction[] {
       },
     )
   }
+  // U7: full ARI drawer when any write capability is on.
+  if (
+    availabilityWrite.value ||
+    rateRestrictionWrite.value ||
+    derivedRateWrite.value
+  ) {
+    actions.push({
+      id: 'edit_ari',
+      label: 'Edit ARI…',
+      disabled: ctx.degraded && !rateRestrictionWrite.value && !derivedRateWrite.value,
+      hint:
+        ctx.degraded && !rateRestrictionWrite.value && !derivedRateWrite.value
+          ? 'Refresh Channex availability before writing'
+          : undefined,
+    })
+  }
   return actions
 }
 
@@ -256,6 +287,10 @@ function onCellAction(id: string, ctx: CellMenuContext) {
       checkInDate: ctx.date,
       rateMinor: ctx.rateMinor,
     }
+    return
+  }
+  if (id === 'edit_ari') {
+    ariDrawerCtx.value = ctx
     return
   }
   if (id === 'close_availability' || id === 'open_availability') {
@@ -441,6 +476,35 @@ async function deleteNote(note: CalendarNote) {
       :notes="notes"
       :build-actions="buildCellActions"
       @cell-action="onCellAction"
+    />
+
+    <CalendarAriDrawer
+      :open="ariDrawerCtx != null"
+      :context="ariDrawerCtx"
+      :network-id="currentNetworkId"
+      :snapshot-version="snapshotVersion"
+      :room-type="ariDrawerCtx ? primaryRoomType(ariDrawerCtx.propertyId) : null"
+      :rate-plans="
+        ariDrawerCtx
+          ? catalogRatePlans.filter((p) => p.propertyId === ariDrawerCtx.propertyId)
+          : []
+      "
+      :availability-write="availabilityWrite"
+      :rate-restriction-write="rateRestrictionWrite"
+      :derived-rate-write="derivedRateWrite"
+      @close="ariDrawerCtx = null"
+      @saved="
+        (msg) => {
+          flash = msg
+          ariDrawerCtx = null
+          void load()
+        }
+      "
+      @stale="
+        () => {
+          void load()
+        }
+      "
     />
 
     <Teleport to="body">

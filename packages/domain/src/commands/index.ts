@@ -19,6 +19,11 @@ import {
   updateCalendarNote,
 } from './calendar-notes'
 import { setRoomTypeAvailability } from './set-room-type-availability'
+import {
+  setRatePlanNightlyRates,
+  setRatePlanRestrictions,
+} from './set-rate-plan-restrictions'
+import { updateDerivedRateModifier } from './update-derived-rate-modifier'
 import type { AnyCommandDefinition } from '../store'
 
 export const commandRegistry = {
@@ -41,6 +46,9 @@ export const commandRegistry = {
   updateCalendarNote,
   deleteCalendarNote,
   setRoomTypeAvailability,
+  setRatePlanRestrictions,
+  setRatePlanNightlyRates,
+  updateDerivedRateModifier,
 } as const satisfies Record<string, AnyCommandDefinition>
 
 export type CommandName = keyof typeof commandRegistry
@@ -65,6 +73,9 @@ export type CommandInputMap = {
   updateCalendarNote: import('./calendar-notes').UpdateCalendarNoteInput
   deleteCalendarNote: import('./calendar-notes').DeleteCalendarNoteInput
   setRoomTypeAvailability: import('./set-room-type-availability').SetRoomTypeAvailabilityInput
+  setRatePlanRestrictions: import('./set-rate-plan-restrictions').SetRatePlanRestrictionsInput
+  setRatePlanNightlyRates: import('./set-rate-plan-restrictions').SetRatePlanNightlyRatesInput
+  updateDerivedRateModifier: import('./update-derived-rate-modifier').UpdateDerivedRateModifierInput
 }
 
 export type CommandOutputMap = {
@@ -87,6 +98,9 @@ export type CommandOutputMap = {
   updateCalendarNote: import('../store').CalendarNoteRecord
   deleteCalendarNote: import('../store').CalendarNoteRecord
   setRoomTypeAvailability: import('./set-room-type-availability').SetRoomTypeAvailabilityResult
+  setRatePlanRestrictions: import('./set-rate-plan-restrictions').SetRatePlanRestrictionsResult
+  setRatePlanNightlyRates: import('./set-rate-plan-restrictions').SetRatePlanNightlyRatesResult
+  updateDerivedRateModifier: import('./update-derived-rate-modifier').UpdateDerivedRateModifierResult
 }
 
 export {
@@ -109,6 +123,9 @@ export {
   updateCalendarNote,
   deleteCalendarNote,
   setRoomTypeAvailability,
+  setRatePlanRestrictions,
+  setRatePlanNightlyRates,
+  updateDerivedRateModifier,
 }
 
 export type { ApplyChannexBookingRevisionInput } from './apply-channex-booking-revision'
@@ -116,3 +133,16 @@ export type {
   SetRoomTypeAvailabilityInput,
   SetRoomTypeAvailabilityResult,
 } from './set-room-type-availability'
+export type {
+  RatePlanRestrictionFields,
+  SetRatePlanNightlyRatesInput,
+  SetRatePlanNightlyRatesResult,
+  SetRatePlanRestrictionsInput,
+  SetRatePlanRestrictionsResult,
+} from './set-rate-plan-restrictions'
+export type {
+  DerivedOptionPayload,
+  DerivedRateOp,
+  UpdateDerivedRateModifierInput,
+  UpdateDerivedRateModifierResult,
+} from './update-derived-rate-modifier'

@@ -67,13 +67,18 @@ export default defineEventHandler(async (event) => {
   }))
   const catalogRatePlans = store.ratePlans
     .filter((p) => p.networkId === networkId)
-    .map((p) => ({
-      channexId: p.channexId,
-      propertyId: p.propertyId,
-      title: p.title,
-      roomTypeChannexId: p.roomTypeChannexId,
-      currency: p.currency,
-    }))
+    .map((p) => {
+      const raw = p.channexRaw as { rate_mode?: string } | null
+      return {
+        channexId: p.channexId,
+        propertyId: p.propertyId,
+        title: p.title,
+        roomTypeChannexId: p.roomTypeChannexId,
+        currency: p.currency,
+        rateMode: raw?.rate_mode ?? null,
+        parentRatePlanChannexId: p.parentRatePlanChannexId,
+      }
+    })
 
   if (q.view === 'calendar') {
     const calendarProperties = properties.map((p) => ({
@@ -155,6 +160,8 @@ export default defineEventHandler(async (event) => {
       capabilities: {
         bookingCrsWrite: capabilities.bookingCrsWrite,
         availabilityWrite: capabilities.availabilityWrite,
+        rateRestrictionWrite: capabilities.rateRestrictionWrite,
+        derivedRateWrite: capabilities.derivedRateWrite,
       },
       snapshotVersion: currentSnapshotVersion(store, networkId),
       // Legacy property-only bars kept for older clients/tests.
@@ -173,6 +180,8 @@ export default defineEventHandler(async (event) => {
     capabilities: {
       bookingCrsWrite: capabilities.bookingCrsWrite,
       availabilityWrite: capabilities.availabilityWrite,
+      rateRestrictionWrite: capabilities.rateRestrictionWrite,
+      derivedRateWrite: capabilities.derivedRateWrite,
     },
     snapshotVersion: currentSnapshotVersion(store, networkId),
     freshness,

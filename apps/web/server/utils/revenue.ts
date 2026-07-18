@@ -8,6 +8,7 @@ import {
   computeReportSummary,
   projectRatesReadOnly,
   runCommand,
+  getNetworkCapabilities,
   type DomainStore,
   type LedgerRecord,
   type LedgerType,
@@ -117,15 +118,39 @@ export function ratesPayload(networkId: number, principal: PrincipalContext) {
     id: p.id,
     name: p.name,
   }))
+  const store = getDomainStore(networkId)
   const cache = getRateCache(
     networkId,
     properties.map((p) => p.id),
   )
+  // Enrich cache rows with rate_mode from catalog when projecting.
+  const catalog = store.ratePlans.filter((p) => p.networkId === networkId)
+  const byPlan = new Map(catalog.map((p) => [p.channexId, p]))
+  const enriched = cache.map((row) => {
+    const plan = byPlan.get(row.ratePlanId)
+    if (!plan) return row
+    const raw = plan.channexRaw as { rate_mode?: string } | null
+    return {
+      ...row,
+      rateMode: raw?.rate_mode ?? null,
+      parentRatePlanChannexId: plan.parentRatePlanChannexId,
+    }
+  })
+  const caps = getNetworkCapabilities(store, networkId)
   return projectRatesReadOnly(
     principal,
     properties,
-    cache,
+    enriched,
     syncFreshness(networkId),
+    Date.now(),
+    {
+      capabilities: {
+        rateRestrictionWrite: caps.rateRestrictionWrite,
+        derivedRateWrite: caps.derivedRateWrite,
+        availabilityWrite: caps.availabilityWrite,
+      },
+      ratePlans: catalog,
+    },
   )
 }
 
