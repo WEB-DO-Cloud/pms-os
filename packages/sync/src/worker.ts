@@ -11,6 +11,7 @@ import { writeFileSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { createChannexClient } from './channex/client'
 import { runAriPull } from './jobs/pull-ari'
+import { detectAriDrift } from './jobs/detect-ari-drift'
 import { runBookingRevisionPull } from './jobs/pull-booking-revisions'
 import { processAckOutbox } from './jobs/process-ack-outbox'
 import { processAriWriteOutbox } from './jobs/process-ari-write-outbox'
@@ -31,6 +32,7 @@ export type WorkerCycleResult = {
   ack: unknown
   ari?: unknown
   ariWrite?: unknown
+  ariDrift?: unknown
 }
 
 export function parseNetworkIds(raw: string | undefined): number[] {
@@ -134,7 +136,19 @@ export async function runLocalWorkerCycle(opts: {
         reason: err instanceof Error ? err.message : 'error',
       }
     }
-    out.push({ networkId, pull, ack, ari, ariWrite })
+    // Optional detect-only drift sample (SYNC_ARI_DRIFT_DETECT=1). Never writes.
+    let ariDrift: unknown
+    if (process.env.SYNC_ARI_DRIFT_DETECT === '1') {
+      try {
+        ariDrift = await detectAriDrift(store, client, networkId, holder)
+      } catch (err) {
+        ariDrift = {
+          skipped: true,
+          reason: err instanceof Error ? err.message : 'error',
+        }
+      }
+    }
+    out.push({ networkId, pull, ack, ari, ariWrite, ariDrift })
   }
   return out
 }

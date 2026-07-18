@@ -69,7 +69,45 @@ Injected migration or worker failure **stops before go** (leave webhooks off; ke
 | Ack outbox pending/failed age | >15m | >60m without drain |
 | Dead-letter growth | +5 / hour | +20 / hour or duplicate booking reports |
 | Pending-sync reservations stuck | >30m | >2h without recovery path |
+| ARI accepted unreconciled age | >15m | >30m (`ariWrite.stuckAcceptedAlerts`) |
+| ARI drifted / partial growth | any new | rising without remediation |
+| Booking CRS open intents | >15m | >60m without matching revision |
 | 5xx rate on `/api/webhooks/channex` | >1% | >5% or auth failure spike |
+
+## ARI / Booking CRS write canary (after core go)
+
+All write capabilities **default off**. Do not enable any write class until staging proof below passes.
+
+### Staging proof (stop gate before any production write class)
+
+- [ ] Sandbox Channex: availability close/open reconciles (accepted → GET match → `reconciled`)
+- [ ] Sandbox: restriction/rate write with warnings lands as `partial`, not silent success
+- [ ] Sandbox: Booking CRS create stays `pending_sync` until revision pull; offline code dedupes
+- [ ] Dry-run paths preview diffs without enqueueing intents
+- [ ] Health API `/api/sync/health` shows `ariWrite` counts with **no** guest PII, API keys, or raw payloads
+- [ ] Kill switch: `setNetworkCapability` disable stops **new** intents; existing outbox still drains/reconciles
+
+### One-property production canary order
+
+Enable **one** property’s network capabilities in this order (expand only after each class is healthy for ≥24h):
+
+1. `availabilityWrite` — close/open a single future date; confirm reconcile + Calendar vacancy
+2. `rateRestrictionWrite` — one parent rate or stop-sell; confirm restriction GET
+3. `derivedRateWrite` — one derived modifier; confirm rate-plan GET
+4. `bookingCrsWrite` — one direct booking; confirm revision + leave `pending_sync` until matched
+5. `aiApply` — only after manual rate writes are stable; human approve only (no autonomous send)
+
+Use Integrations sync health `ariWrite` panel + [verification-queries.md](./verification-queries.md) §8.
+
+### Kill switches
+
+Per-network via org-admin `setNetworkCapability` (capabilities stay independent):
+
+| Capability | Stops new | Existing intents |
+|---|---|---|
+| `availabilityWrite` / `rateRestrictionWrite` / `derivedRateWrite` / `bookingCrsWrite` / `aiApply` | Command enqueue (`CAPABILITY_OFF`) | Worker continues send/reconcile/retry for already-queued rows |
+
+Disabling a class is the preferred pause; Class C (stop worker) only if the write path itself is unsafe.
 
 ## Rollback classes
 
@@ -78,6 +116,7 @@ See [rollback.md](./rollback.md). Choose class before cutting traffic back:
 - **Image-only** — schema unchanged
 - **Restore-required** — failed / incompatible migration
 - **Sync pause / recovery** — app up; Channex path unsafe
+- **ARI write canary rollback** — disable capability + compensate where possible (see rollback.md)
 
 ## Stop criteria (immediate no-go)
 
@@ -85,3 +124,5 @@ See [rollback.md](./rollback.md). Choose class before cutting traffic back:
 - Web or worker never become healthy
 - Verification query shows duplicate Channex mappings or confirmed local-only bookings that should be `pending_sync`
 - Suspected secret leak in logs or image layers
+- Staging ARI/Booking CRS proof incomplete when enabling any write capability
+- Canary property shows stuck accepted >30m or rising drift without a remediation owner

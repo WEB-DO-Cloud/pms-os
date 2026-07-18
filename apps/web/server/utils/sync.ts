@@ -1,5 +1,6 @@
 import {
   authorizeInternalSync,
+  aggregateAriWriteHealth,
   createChannexClient,
   createMemorySyncStore,
   encryptSecret,
@@ -238,10 +239,12 @@ export async function publicSyncHealth(networkId: number, includeErrorDetail = f
   const pendingAckCount = store.domain.ackOutbox.filter(
     (a) => a.networkId === networkId && a.status !== 'sent',
   ).length
+  const ariWrite = aggregateAriWriteHealth(store.domain, networkId)
   return toPublicSyncHealth(health, {
     includeErrorDetail,
     deadLetterCount,
     pendingAckCount,
+    ariWrite,
   })
 }
 

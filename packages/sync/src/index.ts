@@ -27,12 +27,19 @@ export {
 export type { WebhookVerifyResult, WebhookHandleResult } from './webhooks'
 
 export {
+  ACCEPTED_ALERT_AGE_MS,
+  aggregateAriWriteHealth,
   toPublicSyncHealth,
   markSyncRunning,
   markSyncHealthy,
   markSyncFailed,
 } from './sync-health'
-export type { SyncHealthPublic } from './sync-health'
+export type {
+  SyncHealthPublic,
+  AriWriteHealthMetrics,
+  AriWritePropertyHealth,
+  AriWriteStuckAlert,
+} from './sync-health'
 
 export {
   resolveSecret,
@@ -57,6 +64,12 @@ export {
   runAriPull,
   type AriPullResult,
 } from './jobs/pull-ari'
+export {
+  detectAriDrift,
+  dateHasOpenStaffIntent,
+  type AriDriftDetectResult,
+  type AriDriftRecord,
+} from './jobs/detect-ari-drift'
 export type { MessagePullResult } from './jobs/pull-messages'
 
 export { authorizeInternalSync, verifyInternalSecret, isManagerRole } from './internal-auth'
