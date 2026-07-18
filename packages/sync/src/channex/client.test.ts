@@ -118,3 +118,60 @@ describe('Channex ARI client', () => {
     )
   })
 })
+
+describe('Channex Booking CRS client', () => {
+  it('POSTs /bookings with Offline CRS payload', async () => {
+    const fetchFn = vi.fn(async () =>
+      new Response(
+        JSON.stringify({
+          data: {
+            id: 'bk-1',
+            type: 'booking',
+            attributes: {
+              id: 'bk-1',
+              status: 'new',
+              booking_id: 'bk-1',
+              unique_id: 'OFL-PMS-1-9',
+              revision_id: 'rev-1',
+            },
+          },
+        }),
+        { status: 200 },
+      ),
+    )
+    const client = createChannexClient({
+      apiKey: 'test-key',
+      baseUrl: 'https://example.test/api/v1',
+      fetchFn: fetchFn as typeof fetch,
+    })
+
+    const booking = {
+      property_id: 'prop-uuid',
+      ota_reservation_code: 'PMS-1-9',
+      ota_name: 'Offline' as const,
+      arrival_date: '2026-08-01',
+      departure_date: '2026-08-03',
+      currency: 'USD',
+      customer: { name: 'Ada', surname: 'Lovelace' },
+      rooms: [
+        {
+          room_type_id: 'rt-uuid',
+          rate_plan_id: 'rp-uuid',
+          days: { '2026-08-01': '100.00', '2026-08-02': '110.00' },
+          guests: [{ name: 'Ada', surname: 'Lovelace' }],
+          occupancy: { adults: 2, children: 0, infants: 0 },
+        },
+      ],
+    }
+
+    const res = await client.createBooking(booking)
+    expect(res.data.attributes.booking_id).toBe('bk-1')
+    expect(fetchFn).toHaveBeenCalledWith(
+      'https://example.test/api/v1/bookings',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ booking }),
+      }),
+    )
+  })
+})

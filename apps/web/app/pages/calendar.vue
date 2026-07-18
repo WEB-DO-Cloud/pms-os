@@ -80,6 +80,15 @@ async function load() {
       bars: CalendarBar[]
       days: CalendarDaySummary[]
       notes: CalendarNote[]
+      roomTypes?: { id: number; propertyId: number; name: string; channexId: string }[]
+      ratePlans?: {
+        channexId: string
+        propertyId: number
+        title: string
+        roomTypeChannexId: string | null
+        currency: string | null
+      }[]
+      capabilities?: { bookingCrsWrite: boolean }
     }>('/api/reservations', {
       query: {
         networkId: currentNetworkId.value,
@@ -94,6 +103,9 @@ async function load() {
     bars.value = res.bars
     daySummaries.value = res.days ?? []
     notes.value = res.notes ?? []
+    catalogRoomTypes.value = res.roomTypes ?? []
+    catalogRatePlans.value = res.ratePlans ?? []
+    bookingCrsWrite.value = Boolean(res.capabilities?.bookingCrsWrite)
   } catch (err: unknown) {
     const e = err as { data?: { statusMessage?: string }; statusMessage?: string; message?: string }
     error.value =
@@ -154,6 +166,24 @@ const dayDialog = ref<DayDialog | null>(null)
 const dayText = ref('')
 const dayBusy = ref(false)
 const dayError = ref<string | null>(null)
+const bookingCrsWrite = ref(false)
+const catalogRoomTypes = ref<
+  { id: number; propertyId: number; name: string; channexId: string }[]
+>([])
+const catalogRatePlans = ref<
+  {
+    channexId: string
+    propertyId: number
+    title: string
+    roomTypeChannexId: string | null
+    currency: string | null
+  }[]
+>([])
+const bookingPrefill = ref<{
+  propertyId: number
+  checkInDate: string
+  rateMinor: number | null
+} | null>(null)
 
 function notesFor(ctx: CellMenuContext) {
   return notes.value.filter(
@@ -163,13 +193,34 @@ function notesFor(ctx: CellMenuContext) {
 
 function buildCellActions(ctx: CellMenuContext): CellMenuAction[] {
   const count = notesFor(ctx).length
-  return [
+  const actions: CellMenuAction[] = [
     { id: 'task', label: 'Add task on this date' },
     { id: 'note', label: count ? `Notes (${count})` : 'Add note' },
   ]
+  // AE2: hide create when Booking CRS capability is off.
+  if (bookingCrsWrite.value) {
+    const disabled = !ctx.hasRoomMapping || !ctx.hasRateMapping
+    actions.unshift({
+      id: 'direct_booking',
+      label: 'Create direct booking',
+      disabled,
+      hint: disabled
+        ? 'Room type or rate plan mapping is missing for this property'
+        : undefined,
+    })
+  }
+  return actions
 }
 
 function onCellAction(id: string, ctx: CellMenuContext) {
+  if (id === 'direct_booking') {
+    bookingPrefill.value = {
+      propertyId: ctx.propertyId,
+      checkInDate: ctx.date,
+      rateMinor: ctx.rateMinor,
+    }
+    return
+  }
   if (id !== 'task' && id !== 'note') return
   dayDialog.value = { kind: id, ctx }
   dayText.value = ''
@@ -310,6 +361,42 @@ async function deleteNote(note: CalendarNote) {
     />
 
     <Teleport to="body">
+      <div
+        v-if="bookingPrefill"
+        class="day-dialog-backdrop"
+        @click.self="bookingPrefill = null"
+      >
+        <div
+          class="day-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Create direct booking"
+          @keydown.esc="bookingPrefill = null"
+        >
+          <h2>Create direct booking</h2>
+          <ReservationsDirectBookingForm
+            :properties="apiProperties.length ? apiProperties : shellProperties"
+            :room-types="catalogRoomTypes"
+            :rate-plans="catalogRatePlans"
+            :prefill="bookingPrefill"
+            :booking-crs-enabled="bookingCrsWrite"
+            start-open
+            @created="
+              (payload) => {
+                flash =
+                  payload.status === 'pending_sync'
+                    ? `Direct booking #${payload.id} queued (pending Channex revision)`
+                    : `Booking #${payload.id} · ${payload.status}`
+                bookingPrefill = null
+                void load()
+              }
+            "
+            @error="(msg) => (error = msg)"
+            @cancel="bookingPrefill = null"
+          />
+        </div>
+      </div>
+
       <div v-if="dayDialog" class="day-dialog-backdrop" @click.self="dayDialog = null">
         <form
           class="day-dialog"

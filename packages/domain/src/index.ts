@@ -207,6 +207,12 @@ export type {
 } from './automation'
 
 export type { ApplyChannexBookingRevisionInput } from './commands'
+export {
+  offlineReservationCode,
+  splitGuestName,
+  stayNightDates,
+  type CreateDirectReservationInput,
+} from './commands/create-direct-reservation'
 export type {
   ReportSummary,
   ReportFilters,

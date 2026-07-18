@@ -121,11 +121,45 @@ export type ChannexBookingRevisionAttrs = {
   departure_date: string
   property_id: string
   room_type_id?: string
+  /** Present on Offline / Booking CRS revisions for reconciliation. */
+  ota_reservation_code?: string
+  ota_name?: string
   customer?: { name?: string; surname?: string; mail?: string }
   occupancy?: { adults?: number; children?: number; infants?: number }
   currency?: string
   amount?: string
   inserted_at?: string
+}
+
+/** Body for POST /bookings (Booking CRS; wrapped as `{ booking: … }`). */
+export type ChannexCreateBookingInput = {
+  property_id: string
+  ota_reservation_code: string
+  ota_name: 'Offline'
+  arrival_date: string
+  departure_date: string
+  currency?: string
+  customer: { name: string; surname: string; mail?: string }
+  rooms: Array<{
+    room_type_id: string
+    rate_plan_id: string
+    /** Nightly prices: date → decimal string ("100.00"). */
+    days: Record<string, string>
+    guests: Array<{ name: string; surname: string }>
+    occupancy: {
+      adults: number
+      children: number
+      infants: number
+    }
+  }>
+}
+
+export type ChannexCreateBookingAttrs = {
+  id: string
+  status: string
+  booking_id: string
+  unique_id?: string
+  revision_id?: string
 }
 
 export type ChannexMessageAttrs = {

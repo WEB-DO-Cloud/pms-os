@@ -7,6 +7,19 @@ const propertyFilter = ref<number | 'all'>('all')
 const statusFilter = ref<string>('all')
 const rows = ref<ReservationRow[]>([])
 const apiProperties = ref<{ id: number; name: string }[]>([])
+const catalogRoomTypes = ref<
+  { id: number; propertyId: number; name: string; channexId: string }[]
+>([])
+const catalogRatePlans = ref<
+  {
+    channexId: string
+    propertyId: number
+    title: string
+    roomTypeChannexId: string | null
+    currency: string | null
+  }[]
+>([])
+const bookingCrsWrite = ref(false)
 const freshness = ref<{ status: string; updatedAt: string } | null>(null)
 const error = ref<string | null>(null)
 const flash = ref<string | null>(null)
@@ -28,6 +41,15 @@ async function load() {
       properties: { id: number; name: string }[]
       reservations: ReservationRow[]
       freshness: { status: string; updatedAt: string }
+      roomTypes?: { id: number; propertyId: number; name: string; channexId: string }[]
+      ratePlans?: {
+        channexId: string
+        propertyId: number
+        title: string
+        roomTypeChannexId: string | null
+        currency: string | null
+      }[]
+      capabilities?: { bookingCrsWrite: boolean }
     }>('/api/reservations', {
       query: {
         networkId: currentNetworkId.value,
@@ -38,6 +60,9 @@ async function load() {
     apiProperties.value = res.properties
     rows.value = res.reservations
     freshness.value = res.freshness
+    catalogRoomTypes.value = res.roomTypes ?? []
+    catalogRatePlans.value = res.ratePlans ?? []
+    bookingCrsWrite.value = Boolean(res.capabilities?.bookingCrsWrite)
   } catch (err: unknown) {
     const e = err as { data?: { statusMessage?: string }; statusMessage?: string; message?: string }
     error.value =
@@ -104,6 +129,9 @@ watch([currentNetworkId, propertyFilter, statusFilter], () => {
       </div>
       <ReservationsDirectBookingForm
         :properties="apiProperties.length ? apiProperties : shellProperties.map((p) => ({ id: p.id, name: p.name }))"
+        :room-types="catalogRoomTypes"
+        :rate-plans="catalogRatePlans"
+        :booking-crs-enabled="bookingCrsWrite"
         :busy="loading"
         @created="onCreated"
         @error="(msg) => (error = msg)"

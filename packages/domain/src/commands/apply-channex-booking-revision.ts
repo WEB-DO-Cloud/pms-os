@@ -21,6 +21,8 @@ export type ApplyChannexBookingRevisionInput = {
   infants?: number
   currency?: string
   roomTypeId?: number | null
+  /** Offline CRS code — matches pending direct bookings (AE3). */
+  otaReservationCode?: string | null
   /** Active physical rooms for the property (for deterministic assignment). */
   assignableRooms?: readonly AssignableRoom[]
 }
@@ -84,6 +86,18 @@ export const applyChannexBookingRevision: CommandDefinition<
         r.channexBookingId === input.channexBookingId,
     )
 
+    // AE3: pending Offline CRS bookings match by stable ota_reservation_code
+    // before Channex booking id is confirmed on the local row.
+    if (!reservation && input.otaReservationCode) {
+      reservation = store.reservations.find(
+        (r) =>
+          r.networkId === ctx.networkId &&
+          r.propertyId === input.propertyId &&
+          r.otaReservationCode === input.otaReservationCode &&
+          r.status === 'pending_sync',
+      )
+    }
+
     if (!reservation) {
       reservation = {
         id: store.nextId('reservation'),
@@ -113,6 +127,7 @@ export const applyChannexBookingRevision: CommandDefinition<
         checkedOutAt: null,
         sourceRevisionId: input.channexRevisionId,
         channexRaw: input.payload ?? null,
+        otaReservationCode: input.otaReservationCode ?? null,
       }
       store.reservations.push(reservation)
     } else {
@@ -122,6 +137,10 @@ export const applyChannexBookingRevision: CommandDefinition<
       reservation.guestName = input.guestName ?? reservation.guestName
       reservation.roomTypeId =
         input.roomTypeId !== undefined ? input.roomTypeId : reservation.roomTypeId
+      reservation.channexBookingId = input.channexBookingId
+      if (input.otaReservationCode) {
+        reservation.otaReservationCode = input.otaReservationCode
+      }
       reservation.status =
         input.revisionStatus === 'cancelled'
           ? 'cancelled'
@@ -136,6 +155,21 @@ export const applyChannexBookingRevision: CommandDefinition<
       if (input.adults != null) reservation.adults = input.adults
       if (input.children != null) reservation.children = input.children
       if (input.infants != null) reservation.infants = input.infants
+    }
+
+    // Mark matching booking_crs intent reconciled when revision commits.
+    if (reservation.otaReservationCode) {
+      const intent = store.ariWriteIntents.find(
+        (i) =>
+          i.networkId === ctx.networkId &&
+          i.lane === 'booking_crs' &&
+          i.idempotencyKey === `booking_crs:${reservation!.otaReservationCode}`,
+      )
+      if (intent && intent.status !== 'reconciled') {
+        intent.status = 'reconciled'
+        intent.reconciledAt = now
+        intent.updatedAt = now
+      }
     }
 
     if (input.revisionStatus === 'cancelled') {

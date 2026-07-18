@@ -1,4 +1,5 @@
 import { principalCanAccessModule } from '@pms/auth'
+import { getNetworkCapabilities } from '@pms/domain'
 import { requirePrincipal } from '../../utils/auth'
 import {
   isHotelPropertyType,
@@ -38,6 +39,7 @@ export default defineEventHandler(async (event) => {
   const store = getDomainStore(networkId)
   const sync = getSyncStore(networkId)
   const properties = listScopedProperties(networkId, principal)
+  const capabilities = getNetworkCapabilities(store, networkId)
   const reservations = filterReservationsForPrincipal(
     store.reservations,
     principal,
@@ -57,14 +59,29 @@ export default defineEventHandler(async (event) => {
     updatedAt: h.updatedAt,
   }
 
+  const catalogRoomTypes = sync.listRoomTypes(networkId).map((rt) => ({
+    id: rt.id,
+    propertyId: rt.propertyId,
+    name: rt.name,
+    channexId: rt.channexId,
+  }))
+  const catalogRatePlans = store.ratePlans
+    .filter((p) => p.networkId === networkId)
+    .map((p) => ({
+      channexId: p.channexId,
+      propertyId: p.propertyId,
+      title: p.title,
+      roomTypeChannexId: p.roomTypeChannexId,
+      currency: p.currency,
+    }))
+
   if (q.view === 'calendar') {
     const calendarProperties = properties.map((p) => ({
       id: p.id,
       name: p.name,
       isHotel: isHotelPropertyType(propertyTypeFromRaw(p.channexRaw)),
     }))
-    const roomTypes = sync.listRoomTypes(networkId)
-    const roomTypeName = new Map(roomTypes.map((rt) => [rt.id, rt.name]))
+    const roomTypeName = new Map(catalogRoomTypes.map((rt) => [rt.id, rt.name]))
     const rooms = sync
       .listPhysicalRooms(networkId)
       .filter((r) => properties.some((p) => p.id === r.propertyId))
@@ -133,6 +150,11 @@ export default defineEventHandler(async (event) => {
           (!from || n.date >= from) &&
           (!to || n.date < to),
       ),
+      roomTypes: catalogRoomTypes.filter((rt) => scopedIds.has(rt.propertyId)),
+      ratePlans: catalogRatePlans.filter((p) => scopedIds.has(p.propertyId)),
+      capabilities: {
+        bookingCrsWrite: capabilities.bookingCrsWrite,
+      },
       // Legacy property-only bars kept for older clients/tests.
       legacyBars: toCalendarBars(reservations, properties),
       freshness,
@@ -144,6 +166,11 @@ export default defineEventHandler(async (event) => {
     networkId,
     properties: properties.map((p) => ({ id: p.id, name: p.name })),
     reservations,
+    roomTypes: catalogRoomTypes,
+    ratePlans: catalogRatePlans,
+    capabilities: {
+      bookingCrsWrite: capabilities.bookingCrsWrite,
+    },
     freshness,
   }
 })

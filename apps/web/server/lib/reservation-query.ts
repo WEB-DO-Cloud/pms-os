@@ -29,24 +29,30 @@ export function filterReservationsForPrincipal(
 }
 
 export type DirectBookingWriteBackResult =
-  | { ok: true; channexBookingId: string }
+  | { ok: true; channexBookingId: string; reconciled: boolean }
   | { ok: false; reason: string }
 
 /**
  * Apply Channex write-back outcome onto a pending direct booking.
- * Failed writes must remain pending_sync — never silently confirmed.
+ * HTTP acceptance alone must not confirm (AE3) — set reconciled:true only
+ * after a matching booking revision commits.
  */
 export function applyWriteBackResult(
   reservation: ReservationRecord,
   result: DirectBookingWriteBackResult,
 ): ReservationRecord {
-  if (result.ok) {
-    reservation.channexBookingId = result.channexBookingId
+  if (!result.ok) {
+    reservation.status = 'pending_sync'
+    reservation.pendingSyncReason = result.reason
+    return reservation
+  }
+  reservation.channexBookingId = result.channexBookingId
+  if (result.reconciled) {
     reservation.status = 'confirmed'
     reservation.pendingSyncReason = null
   } else {
     reservation.status = 'pending_sync'
-    reservation.pendingSyncReason = result.reason
+    reservation.pendingSyncReason = 'awaiting_channex_revision'
   }
   return reservation
 }

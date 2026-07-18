@@ -100,6 +100,8 @@ export type ReservationRecord = {
   staffNotes: string | null
   channexBookingId: string | null
   pendingSyncReason: string | null
+  /** Stable Offline CRS code (PMS-{networkId}-{id}) for revision match. */
+  otaReservationCode?: string | null
   guestName: string | null
   guestEmail?: string | null
   adults?: number

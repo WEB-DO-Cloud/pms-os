@@ -1,6 +1,8 @@
 import type {
   ChannexAvailabilityResponse,
   ChannexBookingRevisionAttrs,
+  ChannexCreateBookingAttrs,
+  ChannexCreateBookingInput,
   ChannexCreatePropertyInput,
   ChannexCreateRatePlanInput,
   ChannexCreateRoomTypeInput,
@@ -174,6 +176,20 @@ export function createChannexClient(opts: ChannexClientOptions) {
           },
         }),
       })
+    },
+
+    /**
+     * Booking CRS beta: create an Offline booking.
+     * HTTP acceptance is not confirmation — wait for a booking revision (AE3).
+     */
+    createBooking(input: ChannexCreateBookingInput) {
+      return request<{ data: ChannexResource<ChannexCreateBookingAttrs> }>(
+        '/bookings',
+        {
+          method: 'POST',
+          body: JSON.stringify({ booking: input }),
+        },
+      )
     },
 
     getBookingRevisionFeed() {

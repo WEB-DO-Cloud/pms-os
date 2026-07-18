@@ -2,7 +2,7 @@ import { requirePrincipal } from '../../utils/auth'
 import { parseNetworkId } from '../../utils/integrations'
 import { createDirectBooking } from '../../utils/reservations'
 
-/** POST /api/reservations — create direct booking (pending_sync until Channex write succeeds) */
+/** POST /api/reservations — create direct booking (pending_sync until Channex revision confirms) */
 export default defineEventHandler(async (event) => {
   const body = (await readBody(event).catch(() => ({}))) as {
     networkId?: number
@@ -14,6 +14,10 @@ export default defineEventHandler(async (event) => {
     children?: number
     infants?: number
     currency?: string
+    roomTypeId?: number
+    ratePlanChannexId?: string
+    days?: Record<string, string>
+    idempotencyKey?: string
   }
   const networkId = parseNetworkId(body.networkId)
   const { principal } = await requirePrincipal(event, networkId)
@@ -31,6 +35,16 @@ export default defineEventHandler(async (event) => {
       statusMessage: 'checkInDate, checkOutDate, and guestName required',
     })
   }
+  const roomTypeId = Number(body.roomTypeId)
+  if (!Number.isFinite(roomTypeId) || roomTypeId < 1) {
+    throw createError({ statusCode: 400, statusMessage: 'roomTypeId required' })
+  }
+  if (!body.ratePlanChannexId?.trim()) {
+    throw createError({ statusCode: 400, statusMessage: 'ratePlanChannexId required' })
+  }
+  if (!body.days || typeof body.days !== 'object') {
+    throw createError({ statusCode: 400, statusMessage: 'days (nightly prices) required' })
+  }
 
   return createDirectBooking(principal, {
     propertyId,
@@ -41,5 +55,9 @@ export default defineEventHandler(async (event) => {
     children: body.children,
     infants: body.infants,
     currency: body.currency,
+    roomTypeId,
+    ratePlanChannexId: body.ratePlanChannexId.trim(),
+    days: body.days,
+    idempotencyKey: body.idempotencyKey,
   })
 })

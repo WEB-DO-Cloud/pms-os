@@ -293,6 +293,15 @@ describe('domain commands', () => {
 
   it('createDirectReservation stays pending_sync and flags external sync recovery', async () => {
     const store = createMemoryStore()
+    store.networkCapabilities.push({
+      networkId: 1,
+      bookingCrsWrite: true,
+      availabilityWrite: false,
+      rateRestrictionWrite: false,
+      derivedRateWrite: false,
+      aiApply: false,
+      updatedAt: new Date().toISOString(),
+    })
     const user = principal({ role: 'front_desk', propertyIds: [10], networkWide: false })
 
     const result = await runCommand(
@@ -304,6 +313,10 @@ describe('domain commands', () => {
         checkOutDate: '2026-08-03',
         guestName: 'Grace',
         adults: 2,
+        roomTypeId: 5,
+        roomTypeChannexId: 'rt-uuid',
+        ratePlanChannexId: 'rp-uuid',
+        days: { '2026-08-01': '100.00', '2026-08-02': '100.00' },
       },
       { store },
     )
@@ -316,6 +329,30 @@ describe('domain commands', () => {
       networkId: 1,
     })
     expect(result.meta?.needsExternalSyncRecovery).toBe(true)
+    expect(store.ariWriteIntents).toHaveLength(1)
+    expect(store.ariWriteIntents[0]?.lane).toBe('booking_crs')
+  })
+
+  it('createDirectReservation fails closed when bookingCrsWrite is off', async () => {
+    const store = createMemoryStore()
+    const user = principal({ role: 'front_desk', propertyIds: [10], networkWide: false })
+    const result = await runCommand(
+      'createDirectReservation',
+      ctx(user, { networkId: 1, propertyId: 10 }),
+      {
+        propertyId: 10,
+        checkInDate: '2026-08-01',
+        checkOutDate: '2026-08-03',
+        guestName: 'Grace',
+        roomTypeId: 5,
+        roomTypeChannexId: 'rt-uuid',
+        ratePlanChannexId: 'rp-uuid',
+        days: { '2026-08-01': '100.00', '2026-08-02': '100.00' },
+      },
+      { store },
+    )
+    expect(result.status).toBe('rejected')
+    expect(result.error?.code).toBe('CAPABILITY_OFF')
   })
 
   it('applyChannexBookingRevision claims revision + ack outbox without Channex HTTP', async () => {
