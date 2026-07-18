@@ -10,6 +10,7 @@
 import { writeFileSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { createChannexClient } from './channex/client'
+import { runAriPull } from './jobs/pull-ari'
 import { runBookingRevisionPull } from './jobs/pull-booking-revisions'
 import { processAckOutbox } from './jobs/process-ack-outbox'
 import { resolveSecret } from './secrets'
@@ -27,6 +28,7 @@ export type WorkerCycleResult = {
   networkId: number
   pull: unknown
   ack: unknown
+  ari?: unknown
 }
 
 export function parseNetworkIds(raw: string | undefined): number[] {
@@ -97,7 +99,14 @@ export async function runLocalWorkerCycle(opts: {
     const client = createChannexClient({ apiKey: resolveSecret(secretRow) })
     const pull = await runBookingRevisionPull(store, client, networkId, holder)
     const ack = await processAckOutbox(store, client, networkId)
-    out.push({ networkId, pull, ack })
+    // Local mode has no PG write-through; the projection lives in this process.
+    let ari: unknown
+    try {
+      ari = await runAriPull(store, client, networkId, holder)
+    } catch (err) {
+      ari = { skipped: true, reason: err instanceof Error ? err.message : 'error' }
+    }
+    out.push({ networkId, pull, ack, ari })
   }
   return out
 }

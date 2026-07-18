@@ -47,6 +47,12 @@ export { runCatalogImport } from './jobs/import-catalog'
 export { runBookingRevisionPull } from './jobs/pull-booking-revisions'
 export { processAckOutbox } from './jobs/process-ack-outbox'
 export { channexTimestamp, runMessagePull } from './jobs/pull-messages'
+export {
+  ARI_RESTRICTION_FIELDS,
+  channexRateToMinor,
+  runAriPull,
+  type AriPullResult,
+} from './jobs/pull-ari'
 export type { MessagePullResult } from './jobs/pull-messages'
 
 export { authorizeInternalSync, verifyInternalSecret, isManagerRole } from './internal-auth'

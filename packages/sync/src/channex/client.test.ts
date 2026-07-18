@@ -70,3 +70,51 @@ describe('Channex message client', () => {
     )
   })
 })
+
+describe('Channex ARI client', () => {
+  function jsonClient(payload: unknown) {
+    const fetchFn = vi.fn(async () =>
+      new Response(JSON.stringify(payload), { status: 200 }),
+    )
+    const client = createChannexClient({
+      apiKey: 'test-key',
+      baseUrl: 'https://example.test/api/v1',
+      fetchFn: fetchFn as typeof fetch,
+    })
+    return { fetchFn, client }
+  }
+
+  it('reads availability scoped to property and date range', async () => {
+    const { fetchFn, client } = jsonClient({ data: { 'room-1': { '2026-08-01': 2 } } })
+    const res = await client.getAvailability('prop-1', '2026-08-01', '2026-08-02')
+    expect(res.data['room-1']?.['2026-08-01']).toBe(2)
+    expect(fetchFn).toHaveBeenCalledWith(
+      'https://example.test/api/v1/availability?filter[property_id]=prop-1&filter[date][gte]=2026-08-01&filter[date][lte]=2026-08-02',
+      expect.anything(),
+    )
+  })
+
+  it('reads restrictions with an explicit restriction field list', async () => {
+    const { fetchFn, client } = jsonClient({
+      data: { 'plan-1': { '2026-08-01': { rate: '200.00', stop_sell: false } } },
+    })
+    const res = await client.getRestrictions('prop-1', '2026-08-01', '2026-08-02', [
+      'rate',
+      'stop_sell',
+    ])
+    expect(res.data['plan-1']?.['2026-08-01']?.rate).toBe('200.00')
+    expect(fetchFn).toHaveBeenCalledWith(
+      'https://example.test/api/v1/restrictions?filter[property_id]=prop-1&filter[date][gte]=2026-08-01&filter[date][lte]=2026-08-02&filter[restrictions]=rate,stop_sell',
+      expect.anything(),
+    )
+  })
+
+  it('lists rate plans filtered by property', async () => {
+    const { fetchFn, client } = jsonClient({ data: [] })
+    await client.listRatePlans('prop-1')
+    expect(fetchFn).toHaveBeenCalledWith(
+      'https://example.test/api/v1/rate_plans?filter[property_id]=prop-1&pagination[page]=1&pagination[limit]=100',
+      expect.anything(),
+    )
+  })
+})

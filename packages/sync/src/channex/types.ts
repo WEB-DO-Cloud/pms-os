@@ -86,6 +86,31 @@ export type ChannexRatePlanAttrs = {
   room_type_id?: string
   currency?: string
   updated_at?: string
+  /** manual | derived | auto | cascade */
+  rate_mode?: string
+  parent_rate_plan_id?: string | null
+  auto_rate_settings?: unknown
+}
+
+/** GET /availability — data is a plain map: room type ID → date → count. */
+export type ChannexAvailabilityResponse = {
+  data: Record<string, Record<string, number>>
+}
+
+export type ChannexRestrictionValues = {
+  /** Decimal string ("200.00") on read; integers are cents. */
+  rate?: string | number | null
+  min_stay_arrival?: number | null
+  min_stay_through?: number | null
+  max_stay?: number | null
+  closed_to_arrival?: boolean | null
+  closed_to_departure?: boolean | null
+  stop_sell?: boolean | null
+}
+
+/** GET /restrictions — data is a plain map: rate plan ID → date → values. */
+export type ChannexRestrictionsResponse = {
+  data: Record<string, Record<string, ChannexRestrictionValues>>
 }
 
 export type ChannexBookingRevisionAttrs = {

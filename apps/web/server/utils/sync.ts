@@ -7,6 +7,7 @@ import {
   markSyncHealthy,
   processAckOutbox,
   resolveSecret,
+  runAriPull,
   runBookingRevisionPull,
   runCatalogImport,
   runMessagePull,
@@ -198,6 +199,21 @@ export async function handleChannexWebhook(
   const revisionId = extractRevisionIdFromWebhook(verified.payload)
   markSyncHealthy(store, networkId, { lastWebhookAt: new Date().toISOString() })
 
+  if (verified.payload.event === 'ari') {
+    // ARI changed at Channex — targeted re-pull, never a direct projection write
+    // from webhook values (out-of-order deliveries would corrupt the snapshot).
+    const channexPropertyId =
+      verified.payload.payload?.property_id ?? verified.payload.property_id
+    const property = channexPropertyId
+      ? store.findPropertyByChannexId(networkId, channexPropertyId)
+      : null
+    const result = await runInternalAriPull(
+      networkId,
+      property ? { propertyId: property.id } : undefined,
+    )
+    return { status: 'processed', result }
+  }
+
   if (verified.payload.event === 'message') {
     // Guest chat message registered at Channex — pull threads into the Inbox.
     const client = getChannexClientForNetwork(store, networkId)
@@ -239,7 +255,42 @@ export async function runInternalPull(networkId: number) {
   } catch (err) {
     messages = { skipped: true as const, reason: err instanceof Error ? err.message : 'error' }
   }
-  return { ...pull, messages }
+  // Live ARI projection rides the same tick; failures never block booking sync.
+  let ari
+  try {
+    ari = await runInternalAriPull(networkId)
+  } catch (err) {
+    ari = { skipped: true as const, reason: err instanceof Error ? err.message : 'error' }
+  }
+  return { ...pull, messages, ari }
+}
+
+/**
+ * Pull Channex ARI into the in-memory projection and write changed rows
+ * through to PG so snapshot versions survive restarts.
+ */
+export async function runInternalAriPull(
+  networkId: number,
+  opts?: { propertyId?: number; dateFrom?: string; dateTo?: string },
+) {
+  const store = await ensureSecretsHydrated(networkId)
+  const client = getChannexClientForNetwork(store, networkId)
+  const result = await runAriPull(store, client, networkId, `web-${Date.now()}`, opts)
+  if (!result.skipped && result.changed > 0 && process.env.DATABASE_URL) {
+    try {
+      const { persistAriProjection } = await import('../lib/ari-persistence')
+      const changedAvailability = store.domain.ariAvailability.filter(
+        (a) => a.networkId === networkId && a.snapshotVersion === result.snapshotVersion,
+      )
+      const changedRestrictions = store.domain.ariRestrictions.filter(
+        (r) => r.networkId === networkId && r.snapshotVersion === result.snapshotVersion,
+      )
+      await persistAriProjection(getDb(), networkId, changedAvailability, changedRestrictions)
+    } catch {
+      // Best-effort: memory projection still serves reads; next pull retries.
+    }
+  }
+  return result
 }
 
 export async function runInternalMessagePull(networkId: number) {

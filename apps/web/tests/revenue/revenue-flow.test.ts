@@ -10,6 +10,7 @@ import {
   type ReservationRecord,
 } from '@pms/domain'
 import { fixtureRateCache, fixtureRateCacheMiss } from '@pms/sync'
+import { projectLiveRateCache } from '../../server/utils/revenue'
 
 function principal(
   overrides: Partial<Parameters<typeof buildPrincipal>[0]> = {},
@@ -94,6 +95,120 @@ describe('revenue web: rates read-only projection', () => {
     )
     expect(model.plans[0]?.state).toBe('unavailable')
     expect(model.freshness.stale).toBe(true)
+  })
+})
+
+describe('revenue web: live ARI rate cache projection', () => {
+  it('summarizes the ARI projection per plan and satisfies the read-only contract', () => {
+    const store = createMemoryStore()
+    store.ratePlans.push(
+      {
+        networkId: 1,
+        propertyId: 10,
+        channexId: 'plan-live',
+        roomTypeChannexId: 'room-1',
+        title: 'Live BAR',
+        currency: 'EUR',
+        parentRatePlanChannexId: null,
+        channexRaw: null,
+        pulledAt: '2026-08-01T08:00:00.000Z',
+      },
+      {
+        networkId: 1,
+        propertyId: 10,
+        channexId: 'plan-empty',
+        roomTypeChannexId: 'room-1',
+        title: 'Unpulled plan',
+        currency: null,
+        parentRatePlanChannexId: null,
+        channexRaw: null,
+        pulledAt: '2026-08-01T08:00:00.000Z',
+      },
+    )
+    store.ariRestrictions.push(
+      {
+        networkId: 1,
+        propertyId: 10,
+        ratePlanChannexId: 'plan-live',
+        date: '2026-08-01',
+        rateMinor: 20_000,
+        minStayArrival: 2,
+        minStayThrough: null,
+        maxStay: null,
+        closedToArrival: false,
+        closedToDeparture: false,
+        stopSell: false,
+        snapshotVersion: 1,
+        pulledAt: '2026-08-01T08:00:00.000Z',
+      },
+      {
+        networkId: 1,
+        propertyId: 10,
+        ratePlanChannexId: 'plan-live',
+        date: '2026-08-02',
+        rateMinor: 21_550,
+        minStayArrival: 3,
+        minStayThrough: null,
+        maxStay: null,
+        closedToArrival: false,
+        closedToDeparture: false,
+        stopSell: true,
+        snapshotVersion: 1,
+        pulledAt: '2026-08-01T08:00:00.000Z',
+      },
+    )
+
+    const rows = projectLiveRateCache(store, 1, [10], '2026-08-02')
+    const live = rows.find((r) => r.ratePlanId === 'plan-live')
+    // Representative values come from today's date within the pulled range.
+    expect(live).toMatchObject({
+      propertyId: 10,
+      ratePlanName: 'Live BAR',
+      currency: 'EUR',
+      amountMinor: 21_550,
+      dateFrom: '2026-08-01',
+      dateTo: '2026-08-02',
+      minStay: 3,
+      stopSell: true,
+      cachedAt: '2026-08-01T08:00:00.000Z',
+    })
+    // A plan with no projected dates is an explicit cache miss, not a fabrication.
+    const empty = rows.find((r) => r.ratePlanId === 'plan-empty')
+    expect(empty).toMatchObject({ amountMinor: null, cachedAt: null })
+
+    // The live rows still satisfy the read-only rates contract end to end.
+    const model = projectRatesReadOnly(
+      principal({ role: 'front_desk', propertyIds: [10] }),
+      [{ id: 10, name: 'Casa' }],
+      rows,
+      {
+        status: 'healthy',
+        lastPullAt: '2026-08-01T08:00:00.000Z',
+        updatedAt: '2026-08-01T08:00:00.000Z',
+      },
+      Date.parse('2026-08-01T12:00:00.000Z'),
+    )
+    expect(model.readOnly).toBe(true)
+    expect(model.plans.find((p) => p.ratePlanId === 'plan-live')?.state).toBe('cached')
+    expect(model.plans.find((p) => p.ratePlanId === 'plan-empty')?.state).toBe(
+      'cache_miss',
+    )
+  })
+
+  it('excludes other networks and out-of-scope properties', () => {
+    const store = createMemoryStore()
+    store.ratePlans.push({
+      networkId: 2,
+      propertyId: 10,
+      channexId: 'plan-foreign',
+      roomTypeChannexId: null,
+      title: 'Foreign',
+      currency: null,
+      parentRatePlanChannexId: null,
+      channexRaw: null,
+      pulledAt: '2026-08-01T08:00:00.000Z',
+    })
+    expect(projectLiveRateCache(store, 1, [10])).toEqual([])
   })
 })
 

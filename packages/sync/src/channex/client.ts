@@ -1,4 +1,5 @@
 import type {
+  ChannexAvailabilityResponse,
   ChannexBookingRevisionAttrs,
   ChannexCreatePropertyInput,
   ChannexCreateRatePlanInput,
@@ -10,6 +11,7 @@ import type {
   ChannexPropertyAttrs,
   ChannexRatePlanAttrs,
   ChannexResource,
+  ChannexRestrictionsResponse,
   ChannexRoomTypeAttrs,
 } from './types'
 
@@ -131,6 +133,34 @@ export function createChannexClient(opts: ChannexClientOptions) {
         method: 'POST',
         body: JSON.stringify({ room_type: input }),
       })
+    },
+
+    listRatePlans(propertyChannexId: string, page = 1) {
+      const filter = encodeURIComponent(propertyChannexId)
+      return request<ChannexListResponse<ChannexRatePlanAttrs>>(
+        `/rate_plans?filter[property_id]=${filter}&pagination[page]=${page}&pagination[limit]=100`,
+      )
+    },
+
+    /** ARI read: room-type availability map for one property/date range. */
+    getAvailability(propertyChannexId: string, dateFrom: string, dateTo: string) {
+      const filter = encodeURIComponent(propertyChannexId)
+      return request<ChannexAvailabilityResponse>(
+        `/availability?filter[property_id]=${filter}&filter[date][gte]=${dateFrom}&filter[date][lte]=${dateTo}`,
+      )
+    },
+
+    /** ARI read: rate-plan restriction map for one property/date range. */
+    getRestrictions(
+      propertyChannexId: string,
+      dateFrom: string,
+      dateTo: string,
+      restrictions: readonly string[],
+    ) {
+      const filter = encodeURIComponent(propertyChannexId)
+      return request<ChannexRestrictionsResponse>(
+        `/restrictions?filter[property_id]=${filter}&filter[date][gte]=${dateFrom}&filter[date][lte]=${dateTo}&filter[restrictions]=${restrictions.join(',')}`,
+      )
     },
 
     createRatePlan(input: ChannexCreateRatePlanInput) {
