@@ -88,7 +88,8 @@ async function load() {
         roomTypeChannexId: string | null
         currency: string | null
       }[]
-      capabilities?: { bookingCrsWrite: boolean }
+      capabilities?: { bookingCrsWrite: boolean; availabilityWrite?: boolean }
+      snapshotVersion?: number
     }>('/api/reservations', {
       query: {
         networkId: currentNetworkId.value,
@@ -106,6 +107,8 @@ async function load() {
     catalogRoomTypes.value = res.roomTypes ?? []
     catalogRatePlans.value = res.ratePlans ?? []
     bookingCrsWrite.value = Boolean(res.capabilities?.bookingCrsWrite)
+    availabilityWrite.value = Boolean(res.capabilities?.availabilityWrite)
+    snapshotVersion.value = res.snapshotVersion ?? 0
   } catch (err: unknown) {
     const e = err as { data?: { statusMessage?: string }; statusMessage?: string; message?: string }
     error.value =
@@ -167,6 +170,8 @@ const dayText = ref('')
 const dayBusy = ref(false)
 const dayError = ref<string | null>(null)
 const bookingCrsWrite = ref(false)
+const availabilityWrite = ref(false)
+const snapshotVersion = ref(0)
 const catalogRoomTypes = ref<
   { id: number; propertyId: number; name: string; channexId: string }[]
 >([])
@@ -184,11 +189,16 @@ const bookingPrefill = ref<{
   checkInDate: string
   rateMinor: number | null
 } | null>(null)
+const availabilityBusy = ref(false)
 
 function notesFor(ctx: CellMenuContext) {
   return notes.value.filter(
     (n) => n.propertyId === ctx.propertyId && n.date === ctx.date,
   )
+}
+
+function primaryRoomType(propertyId: number) {
+  return catalogRoomTypes.value.find((rt) => rt.propertyId === propertyId) ?? null
 }
 
 function buildCellActions(ctx: CellMenuContext): CellMenuAction[] {
@@ -209,6 +219,33 @@ function buildCellActions(ctx: CellMenuContext): CellMenuAction[] {
         : undefined,
     })
   }
+  // U6: hide close/open when availabilityWrite is off (manager+ also gated server-side).
+  if (availabilityWrite.value) {
+    const roomType = primaryRoomType(ctx.propertyId)
+    const disabled = !roomType || !ctx.hasRoomMapping || ctx.degraded
+    actions.push(
+      {
+        id: 'close_availability',
+        label: 'Close availability',
+        disabled,
+        hint: disabled
+          ? ctx.degraded
+            ? 'Refresh Channex availability before writing'
+            : 'Room type mapping is missing for this property'
+          : undefined,
+      },
+      {
+        id: 'open_availability',
+        label: 'Open availability',
+        disabled,
+        hint: disabled
+          ? ctx.degraded
+            ? 'Refresh Channex availability before writing'
+            : 'Room type mapping is missing for this property'
+          : undefined,
+      },
+    )
+  }
   return actions
 }
 
@@ -221,10 +258,56 @@ function onCellAction(id: string, ctx: CellMenuContext) {
     }
     return
   }
+  if (id === 'close_availability' || id === 'open_availability') {
+    void submitAvailability(id === 'close_availability' ? 0 : ctx.capacity, ctx)
+    return
+  }
   if (id !== 'task' && id !== 'note') return
   dayDialog.value = { kind: id, ctx }
   dayText.value = ''
   dayError.value = null
+}
+
+async function submitAvailability(availability: number, ctx: CellMenuContext) {
+  const roomType = primaryRoomType(ctx.propertyId)
+  if (!roomType || availabilityBusy.value) return
+  availabilityBusy.value = true
+  error.value = null
+  try {
+    await $fetch('/api/calendar/availability', {
+      method: 'POST',
+      body: {
+        networkId: currentNetworkId.value,
+        propertyId: ctx.propertyId,
+        roomTypeId: roomType.id,
+        dateFrom: ctx.date,
+        dateTo: ctx.date,
+        availability,
+        baseSnapshotVersion: snapshotVersion.value,
+      },
+    })
+    flash.value =
+      availability === 0
+        ? `Availability closed for ${ctx.date} — pending sync`
+        : `Availability opened (${availability}) for ${ctx.date} — pending sync`
+    await load()
+  } catch (err: unknown) {
+    const e = err as {
+      data?: { statusMessage?: string; data?: { error?: { code?: string } } }
+      statusMessage?: string
+      statusCode?: number
+    }
+    if (e?.data?.data?.error?.code === 'STALE_SNAPSHOT' || e?.statusCode === 409) {
+      flash.value = null
+      error.value = 'Calendar changed — refreshed. Retry the availability write.'
+      await load()
+    } else {
+      error.value =
+        e?.data?.statusMessage ?? e?.statusMessage ?? 'Availability write failed'
+    }
+  } finally {
+    availabilityBusy.value = false
+  }
 }
 
 function startNoteEdit(note: CalendarNote) {

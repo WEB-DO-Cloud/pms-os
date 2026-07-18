@@ -97,6 +97,26 @@ export type ChannexAvailabilityResponse = {
   data: Record<string, Record<string, number>>
 }
 
+/** One row in POST /availability `{ values: [...] }`. */
+export type ChannexAvailabilityValue = {
+  property_id: string
+  room_type_id: string
+  date?: string
+  date_from?: string
+  date_to?: string
+  availability: number
+}
+
+/** POST /availability — HTTP 200 may still carry meta.warnings (AE4). */
+export type ChannexAvailabilityUpdateResponse = {
+  data?: Array<{ id?: string; type?: string } | string>
+  meta?: {
+    message?: string
+    task_id?: string
+    warnings?: unknown[]
+  }
+}
+
 export type ChannexRestrictionValues = {
   /** Decimal string ("200.00") on read; integers are cents. */
   rate?: string | number | null

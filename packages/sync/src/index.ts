@@ -46,6 +46,10 @@ export type { EncryptedSecret, NetworkSecretMaterial, SecretPublicStatus } from 
 export { runCatalogImport } from './jobs/import-catalog'
 export { runBookingRevisionPull } from './jobs/pull-booking-revisions'
 export { processAckOutbox } from './jobs/process-ack-outbox'
+export {
+  processAriWriteOutbox,
+  type AriWriteOutboxResult,
+} from './jobs/process-ari-write-outbox'
 export { channexTimestamp, runMessagePull } from './jobs/pull-messages'
 export {
   ARI_RESTRICTION_FIELDS,

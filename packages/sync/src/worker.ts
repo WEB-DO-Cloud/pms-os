@@ -13,6 +13,7 @@ import { createChannexClient } from './channex/client'
 import { runAriPull } from './jobs/pull-ari'
 import { runBookingRevisionPull } from './jobs/pull-booking-revisions'
 import { processAckOutbox } from './jobs/process-ack-outbox'
+import { processAriWriteOutbox } from './jobs/process-ari-write-outbox'
 import { resolveSecret } from './secrets'
 import { createMemorySyncStore, type SyncStore } from './store'
 
@@ -29,6 +30,7 @@ export type WorkerCycleResult = {
   pull: unknown
   ack: unknown
   ari?: unknown
+  ariWrite?: unknown
 }
 
 export function parseNetworkIds(raw: string | undefined): number[] {
@@ -77,7 +79,24 @@ export async function runHttpWorkerCycle(opts: {
       throw new Error(`ack network ${networkId}: HTTP ${ackRes.status}`)
     }
     const ack = await ackRes.json()
-    out.push({ networkId, pull, ack })
+    // Optional ARI write drain — older web builds may lack the route.
+    let ariWrite: unknown
+    try {
+      const ariWriteRes = await fetch(`${base}/api/internal/sync/ari-write`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ networkId }),
+      })
+      ariWrite = ariWriteRes.ok
+        ? await ariWriteRes.json()
+        : { skipped: true, status: ariWriteRes.status }
+    } catch (err) {
+      ariWrite = {
+        skipped: true,
+        reason: err instanceof Error ? err.message : 'error',
+      }
+    }
+    out.push({ networkId, pull, ack, ariWrite })
   }
   return out
 }
@@ -106,7 +125,16 @@ export async function runLocalWorkerCycle(opts: {
     } catch (err) {
       ari = { skipped: true, reason: err instanceof Error ? err.message : 'error' }
     }
-    out.push({ networkId, pull, ack, ari })
+    let ariWrite: unknown
+    try {
+      ariWrite = await processAriWriteOutbox(store, client, networkId)
+    } catch (err) {
+      ariWrite = {
+        skipped: true,
+        reason: err instanceof Error ? err.message : 'error',
+      }
+    }
+    out.push({ networkId, pull, ack, ari, ariWrite })
   }
   return out
 }

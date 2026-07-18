@@ -207,12 +207,20 @@ export type {
 } from './automation'
 
 export type { ApplyChannexBookingRevisionInput } from './commands'
+export type {
+  SetRoomTypeAvailabilityInput,
+  SetRoomTypeAvailabilityResult,
+} from './commands'
 export {
   offlineReservationCode,
   splitGuestName,
   stayNightDates,
   type CreateDirectReservationInput,
 } from './commands/create-direct-reservation'
+export {
+  availabilityIdempotencyKey,
+  supersedeOverlappingQueuedAvailability,
+} from './commands/set-room-type-availability'
 export type {
   ReportSummary,
   ReportFilters,

@@ -67,4 +67,23 @@ describe.skipIf(!enabled)('Channex sandbox ARI contract', () => {
       expect(plan.attributes.property_id).toBe(propertyId)
     }
   })
+
+  it('POST /availability accepts absolute values and may return warnings meta', async () => {
+    const roomTypes = await client.listRoomTypes(propertyId!)
+    const roomTypeId = roomTypes.data[0]?.id
+    expect(roomTypeId).toBeTruthy()
+    const date = isoDatePlusDays(14)
+    const res = await client.updateAvailability([
+      {
+        property_id: propertyId!,
+        room_type_id: roomTypeId!,
+        date,
+        availability: 1,
+      },
+    ])
+    expect(res).toBeTypeOf('object')
+    if (res.meta?.warnings) {
+      expect(Array.isArray(res.meta.warnings)).toBe(true)
+    }
+  })
 })

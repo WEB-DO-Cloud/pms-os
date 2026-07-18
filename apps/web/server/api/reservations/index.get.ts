@@ -1,5 +1,5 @@
 import { principalCanAccessModule } from '@pms/auth'
-import { getNetworkCapabilities } from '@pms/domain'
+import { currentSnapshotVersion, getNetworkCapabilities } from '@pms/domain'
 import { requirePrincipal } from '../../utils/auth'
 import {
   isHotelPropertyType,
@@ -154,7 +154,9 @@ export default defineEventHandler(async (event) => {
       ratePlans: catalogRatePlans.filter((p) => scopedIds.has(p.propertyId)),
       capabilities: {
         bookingCrsWrite: capabilities.bookingCrsWrite,
+        availabilityWrite: capabilities.availabilityWrite,
       },
+      snapshotVersion: currentSnapshotVersion(store, networkId),
       // Legacy property-only bars kept for older clients/tests.
       legacyBars: toCalendarBars(reservations, properties),
       freshness,
@@ -170,7 +172,9 @@ export default defineEventHandler(async (event) => {
     ratePlans: catalogRatePlans,
     capabilities: {
       bookingCrsWrite: capabilities.bookingCrsWrite,
+      availabilityWrite: capabilities.availabilityWrite,
     },
+    snapshotVersion: currentSnapshotVersion(store, networkId),
     freshness,
   }
 })

@@ -1,5 +1,7 @@
 import type {
   ChannexAvailabilityResponse,
+  ChannexAvailabilityUpdateResponse,
+  ChannexAvailabilityValue,
   ChannexBookingRevisionAttrs,
   ChannexCreateBookingAttrs,
   ChannexCreateBookingInput,
@@ -150,6 +152,18 @@ export function createChannexClient(opts: ChannexClientOptions) {
       return request<ChannexAvailabilityResponse>(
         `/availability?filter[property_id]=${filter}&filter[date][gte]=${dateFrom}&filter[date][lte]=${dateTo}`,
       )
+    },
+
+    /**
+     * ARI write: absolute room-type availability values.
+     * HTTP 200 with meta.warnings is a partial outcome — callers must not treat
+     * the whole batch as reconciled (AE4).
+     */
+    updateAvailability(values: ChannexAvailabilityValue[]) {
+      return request<ChannexAvailabilityUpdateResponse>('/availability', {
+        method: 'POST',
+        body: JSON.stringify({ values }),
+      })
     },
 
     /** ARI read: rate-plan restriction map for one property/date range. */

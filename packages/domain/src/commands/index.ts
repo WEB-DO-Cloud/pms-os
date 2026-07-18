@@ -18,6 +18,7 @@ import {
   deleteCalendarNote,
   updateCalendarNote,
 } from './calendar-notes'
+import { setRoomTypeAvailability } from './set-room-type-availability'
 import type { AnyCommandDefinition } from '../store'
 
 export const commandRegistry = {
@@ -39,6 +40,7 @@ export const commandRegistry = {
   createCalendarNote,
   updateCalendarNote,
   deleteCalendarNote,
+  setRoomTypeAvailability,
 } as const satisfies Record<string, AnyCommandDefinition>
 
 export type CommandName = keyof typeof commandRegistry
@@ -62,6 +64,7 @@ export type CommandInputMap = {
   createCalendarNote: import('./calendar-notes').CreateCalendarNoteInput
   updateCalendarNote: import('./calendar-notes').UpdateCalendarNoteInput
   deleteCalendarNote: import('./calendar-notes').DeleteCalendarNoteInput
+  setRoomTypeAvailability: import('./set-room-type-availability').SetRoomTypeAvailabilityInput
 }
 
 export type CommandOutputMap = {
@@ -83,6 +86,7 @@ export type CommandOutputMap = {
   createCalendarNote: import('../store').CalendarNoteRecord
   updateCalendarNote: import('../store').CalendarNoteRecord
   deleteCalendarNote: import('../store').CalendarNoteRecord
+  setRoomTypeAvailability: import('./set-room-type-availability').SetRoomTypeAvailabilityResult
 }
 
 export {
@@ -104,6 +108,11 @@ export {
   createCalendarNote,
   updateCalendarNote,
   deleteCalendarNote,
+  setRoomTypeAvailability,
 }
 
 export type { ApplyChannexBookingRevisionInput } from './apply-channex-booking-revision'
+export type {
+  SetRoomTypeAvailabilityInput,
+  SetRoomTypeAvailabilityResult,
+} from './set-room-type-availability'
