@@ -148,6 +148,7 @@ export function ratesPayload(networkId: number, principal: PrincipalContext) {
         rateRestrictionWrite: caps.rateRestrictionWrite,
         derivedRateWrite: caps.derivedRateWrite,
         availabilityWrite: caps.availabilityWrite,
+        aiApply: caps.aiApply,
       },
       ratePlans: catalog,
     },

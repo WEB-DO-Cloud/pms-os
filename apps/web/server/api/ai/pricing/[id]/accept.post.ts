@@ -1,40 +1,40 @@
-import { principalCanAccessModule } from '@pms/auth'
-import {
-  findAiProposal,
-  updateAiProposalStatus,
-} from '../../../../lib/ai-proposals'
+import { acceptPricingProposal } from '../../../../utils/ai-pricing'
 import { toHttpError } from '../../../../utils/ai'
 import { requirePrincipal } from '../../../../utils/auth'
 import { parseNetworkId } from '../../../../utils/integrations'
 
-/** POST /api/ai/pricing/:id/accept — mark as accepted local draft (no ARI push). */
+/**
+ * POST /api/ai/pricing/:id/accept
+ * aiApply off → local draft. aiApply on → manager-approved setRatePlanNightlyRates enqueue.
+ */
 export default defineEventHandler(async (event) => {
   try {
     const id = getRouterParam(event, 'id')
-    const body = await readBody<{ networkId: number; note?: string }>(event)
+    const body = await readBody<{
+      networkId: number
+      note?: string
+      /** Indexes into proposal.suggestions; omit = all; [] = apply nothing. */
+      indexes?: number[]
+    }>(event)
     const networkId = parseNetworkId(body.networkId)
     const { principal } = await requirePrincipal(event, networkId)
-    if (!principalCanAccessModule(principal, 'rates')) {
-      throw createError({ statusCode: 403, statusMessage: 'Module denied' })
-    }
     if (!id) throw createError({ statusCode: 400, statusMessage: 'Missing id' })
 
-    const existing = findAiProposal(networkId, id)
-    if (!existing || existing.kind !== 'pricing') {
-      throw createError({ statusCode: 404, statusMessage: 'Proposal not found' })
-    }
-
-    const proposal = updateAiProposalStatus(
+    const result = await acceptPricingProposal(principal, {
       networkId,
-      id,
-      'accepted_local',
-      body.note ?? 'Accepted as local draft — not pushed to Channex',
-    )
+      proposalId: id,
+      indexes: body.indexes,
+      note: body.note,
+    })
 
     return {
-      proposal,
+      proposal: result.proposal,
+      /** HTTP handler never sends to Channex; worker drains outbox. */
       ariWriteEnabled: false,
-      note: 'Accepted locally only. Channex ARI write-back is not enabled.',
+      aiApplyEnabled: result.aiApplyEnabled,
+      appliedViaCommands: result.appliedViaCommands,
+      outcomes: result.outcomes,
+      note: result.note,
     }
   } catch (err) {
     throw toHttpError(err)

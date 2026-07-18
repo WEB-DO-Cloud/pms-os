@@ -43,6 +43,8 @@ export type RatesReadModel = {
   ariWriteEnabled: boolean
   rateRestrictionWrite: boolean
   derivedRateWrite: boolean
+  /** Independent gate for approving AI proposals into rate commands (R21/R23). */
+  aiApply: boolean
   plans: RatePlanView[]
   freshness: {
     status: string
@@ -56,7 +58,10 @@ export type RatesReadModel = {
 export type RatesProjectionOptions = {
   capabilities?: Pick<
     NetworkCapabilityRecord,
-    'rateRestrictionWrite' | 'derivedRateWrite' | 'availabilityWrite'
+    | 'rateRestrictionWrite'
+    | 'derivedRateWrite'
+    | 'availabilityWrite'
+    | 'aiApply'
   >
   /** Catalog rows for rate_mode / derived_option affordances. */
   ratePlans?: readonly RatePlanRecord[]
@@ -92,6 +97,7 @@ export function projectRatesReadOnly(
     rateRestrictionWrite: false,
     derivedRateWrite: false,
     availabilityWrite: false,
+    aiApply: false,
   }
   const ariWriteEnabled =
     caps.rateRestrictionWrite || caps.derivedRateWrite || caps.availabilityWrite
@@ -177,6 +183,7 @@ export function projectRatesReadOnly(
     ariWriteEnabled,
     rateRestrictionWrite: caps.rateRestrictionWrite,
     derivedRateWrite: caps.derivedRateWrite,
+    aiApply: Boolean(caps.aiApply),
     plans,
     freshness: {
       status: freshness.status,
