@@ -8,6 +8,8 @@ export type CreateTaskInput = {
   description?: string
   reservationId?: number
   assignedToUserId?: string | null
+  /** Property-local calendar date (YYYY-MM-DD), e.g. from a calendar cell. */
+  dueDate?: string | null
 }
 
 export const createTask: CommandDefinition<CreateTaskInput, TaskRecord> = {
@@ -21,6 +23,11 @@ export const createTask: CommandDefinition<CreateTaskInput, TaskRecord> = {
   compensatingAction: 'undo_task',
   resolvePropertyId: (input) => input.propertyId,
   async execute(ctx, input, { store }) {
+    if (input.dueDate != null && !/^\d{4}-\d{2}-\d{2}$/.test(input.dueDate)) {
+      throw Object.assign(new Error('dueDate must be YYYY-MM-DD'), {
+        code: 'VALIDATION',
+      })
+    }
     const now = new Date().toISOString()
     const task: TaskRecord = {
       id: store.nextId('task'),
@@ -32,6 +39,7 @@ export const createTask: CommandDefinition<CreateTaskInput, TaskRecord> = {
       category: input.category ?? 'other',
       status: 'todo',
       assignedToUserId: input.assignedToUserId ?? null,
+      dueDate: input.dueDate ?? null,
       createdAt: now,
       updatedAt: now,
       completedAt: null,

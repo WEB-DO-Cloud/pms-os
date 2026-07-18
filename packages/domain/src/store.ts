@@ -36,6 +36,8 @@ export type TaskRecord = {
   status: TaskStatus
   /** Housekeeping list scope uses this when role === housekeeping. */
   assignedToUserId: string | null
+  /** Property-local calendar date (YYYY-MM-DD) the task is due on, if any. */
+  dueDate: string | null
   createdAt: string
   updatedAt: string
   completedAt: string | null

@@ -126,6 +126,13 @@ export default defineEventHandler(async (event) => {
       rows,
       bars,
       days,
+      notes: store.calendarNotes.filter(
+        (n) =>
+          n.networkId === networkId &&
+          scopedIds.has(n.propertyId) &&
+          (!from || n.date >= from) &&
+          (!to || n.date < to),
+      ),
       // Legacy property-only bars kept for older clients/tests.
       legacyBars: toCalendarBars(reservations, properties),
       freshness,

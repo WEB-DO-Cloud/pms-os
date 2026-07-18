@@ -35,6 +35,13 @@ export type CalendarRow = {
 
 export type CalendarLayout = 'horizon' | 'month'
 
+export type CalendarNote = {
+  id: number
+  propertyId: number
+  date: string
+  body: string
+}
+
 export type CalendarDaySummary = {
   propertyId: number
   date: string
@@ -61,6 +68,7 @@ const props = defineProps<{
   days: number
   layout?: CalendarLayout
   daySummaries?: CalendarDaySummary[]
+  notes?: CalendarNote[]
   /** Day-cell menu actions; absent/empty = read-only shell. */
   buildActions?: (ctx: CellMenuContext) => CellMenuAction[]
 }>()
@@ -83,6 +91,12 @@ const summaryByKey = computed(() => {
 
 function summaryFor(propertyId: number, date: string) {
   return summaryByKey.value.get(`${propertyId}:${date}`) ?? null
+}
+
+function hasNote(propertyId: number, date: string) {
+  return (props.notes ?? []).some(
+    (n) => n.propertyId === propertyId && n.date === date,
+  )
 }
 
 const menuContext = ref<CellMenuContext | null>(null)
@@ -321,6 +335,7 @@ function laneLabel(row: CalendarRow) {
               >
                 ▲
               </span>
+              <span v-if="hasNote(block.propertyId, day)" class="marker" title="Note">📝</span>
             </button>
           </template>
         </div>

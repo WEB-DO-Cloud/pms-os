@@ -35,6 +35,7 @@ function task(
     category: 'cleaning',
     status: 'todo',
     assignedToUserId: null,
+    dueDate: null,
     createdAt: now,
     updatedAt: now,
     completedAt: null,

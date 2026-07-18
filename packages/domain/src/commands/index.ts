@@ -13,6 +13,11 @@ import { updatePropertyOps } from './update-property-ops'
 import { importLocalReviews } from './import-local-reviews'
 import { updateReviewStatus } from './update-review-status'
 import { setNetworkCapability } from './set-network-capability'
+import {
+  createCalendarNote,
+  deleteCalendarNote,
+  updateCalendarNote,
+} from './calendar-notes'
 import type { AnyCommandDefinition } from '../store'
 
 export const commandRegistry = {
@@ -31,6 +36,9 @@ export const commandRegistry = {
   importLocalReviews,
   updateReviewStatus,
   setNetworkCapability,
+  createCalendarNote,
+  updateCalendarNote,
+  deleteCalendarNote,
 } as const satisfies Record<string, AnyCommandDefinition>
 
 export type CommandName = keyof typeof commandRegistry
@@ -51,6 +59,9 @@ export type CommandInputMap = {
   importLocalReviews: import('./import-local-reviews').ImportLocalReviewsInput
   updateReviewStatus: import('./update-review-status').UpdateReviewStatusInput
   setNetworkCapability: import('./set-network-capability').SetNetworkCapabilityInput
+  createCalendarNote: import('./calendar-notes').CreateCalendarNoteInput
+  updateCalendarNote: import('./calendar-notes').UpdateCalendarNoteInput
+  deleteCalendarNote: import('./calendar-notes').DeleteCalendarNoteInput
 }
 
 export type CommandOutputMap = {
@@ -69,6 +80,9 @@ export type CommandOutputMap = {
   importLocalReviews: { imported: number; reviews: import('../store').ReviewRecord[] }
   updateReviewStatus: import('../store').ReviewRecord
   setNetworkCapability: import('../store').NetworkCapabilityRecord
+  createCalendarNote: import('../store').CalendarNoteRecord
+  updateCalendarNote: import('../store').CalendarNoteRecord
+  deleteCalendarNote: import('../store').CalendarNoteRecord
 }
 
 export {
@@ -87,6 +101,9 @@ export {
   importLocalReviews,
   updateReviewStatus,
   setNetworkCapability,
+  createCalendarNote,
+  updateCalendarNote,
+  deleteCalendarNote,
 }
 
 export type { ApplyChannexBookingRevisionInput } from './apply-channex-booking-revision'

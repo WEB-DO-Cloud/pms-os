@@ -7,6 +7,7 @@ export type TaskRow = {
   status: string
   assignedToUserId: string | null
   description: string | null
+  dueDate?: string | null
 }
 
 const props = defineProps<{
@@ -33,6 +34,7 @@ const emit = defineEmits<{
       <div>
         <strong>{{ row.title }}</strong>
         <p v-if="row.description" class="desc">{{ row.description }}</p>
+        <p v-if="row.dueDate" class="desc">Due {{ row.dueDate }}</p>
       </div>
       <span>{{
         row.propertyId != null
