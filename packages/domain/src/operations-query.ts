@@ -4,7 +4,6 @@ import {
 } from '@pms/auth'
 import type {
   GuestRecord,
-  OutboundMessageRecord,
   PropertyOpsRecord,
   ReservationRecord,
   ReviewRecord,
@@ -127,11 +126,13 @@ export function projectGuestsForPrincipal(
   )
 }
 
-export function filterMessagesForPrincipal(
-  messages: readonly OutboundMessageRecord[],
+export function filterMessagesForPrincipal<
+  T extends { networkId: number; propertyId: number; reservationId: number | null },
+>(
+  messages: readonly T[],
   principal: PrincipalContext,
   filter: { propertyId?: number; reservationId?: number } = {},
-): OutboundMessageRecord[] {
+): T[] {
   return messages.filter((m) => {
     if (m.networkId !== principal.networkId) return false
     if (!principalCanAccessProperty(principal, m.propertyId)) return false

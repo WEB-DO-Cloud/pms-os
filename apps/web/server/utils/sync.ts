@@ -9,6 +9,7 @@ import {
   resolveSecret,
   runBookingRevisionPull,
   runCatalogImport,
+  runMessagePull,
   toPublicSyncHealth,
   verifyChannexWebhook,
   extractRevisionIdFromWebhook,
@@ -22,6 +23,7 @@ import { isCommercialEdition } from './edition'
 
 const stores = new Map<number, SyncStore>()
 const hydrated = new Set<number>()
+const catalogHydrated = new Set<number>()
 
 export function getSyncStore(networkId: number): SyncStore {
   let store = stores.get(networkId)
@@ -72,6 +74,21 @@ export async function ensureSecretsHydrated(networkId: number): Promise<SyncStor
   }
 
   hydrated.add(networkId)
+
+  // Self-heal the catalog: the memory store starts empty after every restart,
+  // so re-import properties/room types from Channex on first touch.
+  // ponytail: once per process — if Channex is down on first try, the manual
+  // Settings → Integrations import (or a restart) is the retry path.
+  if (!catalogHydrated.has(networkId)) {
+    catalogHydrated.add(networkId)
+    if (store.listProperties(networkId).length === 0) {
+      try {
+        await runInternalImport(networkId)
+      } catch {
+        // No Channex key/group configured yet — pages keep their empty states.
+      }
+    }
+  }
   return store
 }
 
@@ -94,6 +111,31 @@ export function getChannexClientForNetwork(store: SyncStore, networkId: number) 
   }
   const apiKey = resolveSecret(row)
   return createChannexClient({ apiKey })
+}
+
+export async function getScopedChannexMessagingClient(
+  networkId: number,
+  propertyId: number,
+) {
+  const store = await ensureSecretsHydrated(networkId)
+  const property = store
+    .listProperties(networkId)
+    .find((candidate) => candidate.id === propertyId)
+  if (!property) {
+    throw createError({ statusCode: 404, statusMessage: 'Property not found' })
+  }
+  const client = getChannexClientForNetwork(store, networkId)
+  if (isCommercialEdition()) {
+    const groupId = await getNetworkChannexGroupId(networkId)
+    if (!groupId) {
+      throw createError({ statusCode: 403, statusMessage: 'Channex group not configured' })
+    }
+    const allowed = await client.listGroupPropertyIds(groupId)
+    if (!allowed.includes(property.channexId)) {
+      throw createError({ statusCode: 403, statusMessage: 'Channex property out of scope' })
+    }
+  }
+  return { client, property }
 }
 
 export async function requireInternalSyncAuth(
@@ -145,6 +187,13 @@ export async function handleChannexWebhook(
   const revisionId = extractRevisionIdFromWebhook(verified.payload)
   markSyncHealthy(store, networkId, { lastWebhookAt: new Date().toISOString() })
 
+  if (verified.payload.event === 'message') {
+    // Guest chat message registered at Channex — pull threads into the Inbox.
+    const client = getChannexClientForNetwork(store, networkId)
+    const result = await runMessagePull(store, client, networkId, `webhook-${Date.now()}`)
+    return { status: 'processed', result }
+  }
+
   if (!revisionId) {
     return { status: 'ignored', reason: 'no_revision_id' }
   }
@@ -171,7 +220,21 @@ export async function publicSyncHealth(networkId: number, includeErrorDetail = f
 export async function runInternalPull(networkId: number) {
   const store = await ensureSecretsHydrated(networkId)
   const client = getChannexClientForNetwork(store, networkId)
-  return runBookingRevisionPull(store, client, networkId, `web-${Date.now()}`)
+  const pull = await runBookingRevisionPull(store, client, networkId, `web-${Date.now()}`)
+  // Chat messages ride the same worker tick; app-not-installed is a silent skip.
+  let messages
+  try {
+    messages = await runMessagePull(store, client, networkId, `web-${Date.now()}`)
+  } catch (err) {
+    messages = { skipped: true as const, reason: err instanceof Error ? err.message : 'error' }
+  }
+  return { ...pull, messages }
+}
+
+export async function runInternalMessagePull(networkId: number) {
+  const store = await ensureSecretsHydrated(networkId)
+  const client = getChannexClientForNetwork(store, networkId)
+  return runMessagePull(store, client, networkId, `inbox-${Date.now()}`)
 }
 
 export async function runInternalAck(networkId: number) {

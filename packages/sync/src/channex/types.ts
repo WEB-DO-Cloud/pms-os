@@ -103,12 +103,36 @@ export type ChannexBookingRevisionAttrs = {
   inserted_at?: string
 }
 
+export type ChannexMessageAttrs = {
+  message: string | null
+  sender: 'guest' | 'property' | 'system'
+  attachments?: unknown[]
+  inserted_at?: string
+  updated_at?: string
+}
+
+export type ChannexMessageThreadAttrs = {
+  title?: string
+  is_closed?: boolean
+  provider?: string
+  message_count?: number
+  last_message_received_at?: string
+  inserted_at?: string
+  updated_at?: string
+}
+
 export type ChannexWebhookPayload = {
   event: string
   payload?: {
     booking_revision_id?: string
     property_id?: string
     booking_id?: string
+    /** `message` event fields. */
+    id?: string
+    message?: string
+    sender?: string
+    message_thread_id?: string
   }
+  property_id?: string
   timestamp?: string
 }

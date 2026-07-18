@@ -46,6 +46,8 @@ export type { EncryptedSecret, NetworkSecretMaterial, SecretPublicStatus } from 
 export { runCatalogImport } from './jobs/import-catalog'
 export { runBookingRevisionPull } from './jobs/pull-booking-revisions'
 export { processAckOutbox } from './jobs/process-ack-outbox'
+export { channexTimestamp, runMessagePull } from './jobs/pull-messages'
+export type { MessagePullResult } from './jobs/pull-messages'
 
 export { authorizeInternalSync, verifyInternalSecret, isManagerRole } from './internal-auth'
 export type { InternalAuthPrincipal } from './internal-auth'

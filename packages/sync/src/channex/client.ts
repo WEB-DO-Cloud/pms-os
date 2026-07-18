@@ -5,6 +5,8 @@ import type {
   ChannexCreateRoomTypeInput,
   ChannexGroupAttrs,
   ChannexListResponse,
+  ChannexMessageAttrs,
+  ChannexMessageThreadAttrs,
   ChannexPropertyAttrs,
   ChannexRatePlanAttrs,
   ChannexResource,
@@ -161,6 +163,39 @@ export function createChannexClient(opts: ChannexClientOptions) {
         method: 'POST',
         body: '{}',
       })
+    },
+
+    /** Channel chat threads (Messages app must be installed on the property). */
+    listMessageThreads(page = 1) {
+      return request<ChannexListResponse<ChannexMessageThreadAttrs>>(
+        `/message_threads?pagination[page]=${page}&pagination[limit]=100`,
+      )
+    },
+
+    listThreadMessages(threadId: string, page = 1) {
+      return request<ChannexListResponse<ChannexMessageAttrs>>(
+        `/message_threads/${encodeURIComponent(threadId)}/messages?pagination[page]=${page}&pagination[limit]=100`,
+      )
+    },
+
+    getMessageThread(threadId: string) {
+      return request<{ data: ChannexResource<ChannexMessageThreadAttrs> }>(
+        `/message_threads/${encodeURIComponent(threadId)}`,
+      )
+    },
+
+    sendThreadMessage(threadId: string, message: string) {
+      return request<{ data: ChannexResource<ChannexMessageAttrs> }>(
+        `/message_threads/${encodeURIComponent(threadId)}/messages`,
+        { method: 'POST', body: JSON.stringify({ message: { message } }) },
+      )
+    },
+
+    sendBookingMessage(channexBookingId: string, message: string) {
+      return request<{ data: ChannexResource<ChannexMessageAttrs> }>(
+        `/bookings/${encodeURIComponent(channexBookingId)}/messages`,
+        { method: 'POST', body: JSON.stringify({ message: { message } }) },
+      )
     },
   }
 }

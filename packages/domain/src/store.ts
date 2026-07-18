@@ -160,6 +160,31 @@ export type OutboundMessageRecord = {
   createdAt: string
 }
 
+/** Channel (OTA) chat message ingested from Channex — guest or property side. */
+export type ChannelMessageRecord = {
+  id: number
+  networkId: number
+  propertyId: number
+  /** Null for Airbnb inquiry threads that have no booking yet. */
+  reservationId: number | null
+  channexThreadId: string
+  channexMessageId: string
+  /** OTA provider from the thread, e.g. AirBNB / BookingCom. */
+  provider: string | null
+  threadTitle: string | null
+  sender: 'guest' | 'property' | 'system'
+  body: string
+  receivedAt: string
+  createdAt: string
+}
+
+export type ConversationReadRecord = {
+  networkId: number
+  userId: string
+  conversationKey: string
+  lastReadAt: string
+}
+
 export type PendingApprovalRecord = {
   id: string
   networkId: number
@@ -186,6 +211,9 @@ export type DomainStore = {
   bookingRevisions: BookingRevisionRecord[]
   ackOutbox: AckOutboxRecord[]
   outboundMessages: OutboundMessageRecord[]
+  channelMessages: ChannelMessageRecord[]
+  /** ponytail: process-local read markers; persist in PG when chat storage becomes durable. */
+  conversationReads: ConversationReadRecord[]
   guests: GuestRecord[]
   reviews: ReviewRecord[]
   propertyOps: PropertyOpsRecord[]
@@ -206,6 +234,8 @@ export function createMemoryStore(): DomainStore {
     bookingRevisions: [],
     ackOutbox: [],
     outboundMessages: [],
+    channelMessages: [],
+    conversationReads: [],
     guests: [],
     reviews: [],
     propertyOps: [],
