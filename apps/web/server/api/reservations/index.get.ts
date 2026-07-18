@@ -6,6 +6,7 @@ import {
 } from '../../utils/billing'
 import { parseNetworkId } from '../../utils/integrations'
 import {
+  buildCalendarDaySummaries,
   buildCalendarProjection,
   filterReservationsForPrincipal,
   getDomainStore,
@@ -89,11 +90,42 @@ export default defineEventHandler(async (event) => {
       reservations,
     )
 
+    const from = typeof q.from === 'string' ? q.from : undefined
+    const to = typeof q.to === 'string' ? q.to : undefined
+    const dates: string[] = []
+    if (from && to) {
+      const cursor = new Date(`${from}T00:00:00Z`)
+      const end = new Date(`${to}T00:00:00Z`)
+      while (cursor < end && dates.length < 62) {
+        dates.push(cursor.toISOString().slice(0, 10))
+        cursor.setUTCDate(cursor.getUTCDate() + 1)
+      }
+    }
+    const scopedIds = new Set(scopedProperties.map((p) => p.id))
+    const days = buildCalendarDaySummaries(
+      scopedProperties,
+      rooms,
+      reservations,
+      {
+        availability: store.ariAvailability.filter(
+          (a) => a.networkId === networkId && scopedIds.has(a.propertyId),
+        ),
+        restrictions: store.ariRestrictions.filter(
+          (r) => r.networkId === networkId && scopedIds.has(r.propertyId),
+        ),
+        ratePlans: store.ratePlans.filter(
+          (p) => p.networkId === networkId && scopedIds.has(p.propertyId),
+        ),
+      },
+      dates,
+    )
+
     return {
       networkId,
       properties: scopedProperties.map((p) => ({ id: p.id, name: p.name })),
       rows,
       bars,
+      days,
       // Legacy property-only bars kept for older clients/tests.
       legacyBars: toCalendarBars(reservations, properties),
       freshness,

@@ -26,10 +26,12 @@ export {
   isPendingSync,
   toCalendarBars,
   buildCalendarProjection,
+  buildCalendarDaySummaries,
   type DirectBookingWriteBackResult,
   type ReservationListFilter,
   type CalendarBar,
   type CalendarRow,
+  type CalendarDaySummary,
   type CalendarPropertyInput,
   type CalendarRoomInput,
 } from '../lib/reservation-query'

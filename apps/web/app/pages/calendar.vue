@@ -2,6 +2,7 @@
 import CalendarGrid from '~/components/calendar/CalendarGrid.vue'
 import type {
   CalendarBar,
+  CalendarDaySummary,
   CalendarLayout,
   CalendarRow,
 } from '~/components/calendar/CalendarGrid.vue'
@@ -16,6 +17,7 @@ const rangeStart = ref(new Date().toISOString().slice(0, 10))
 const propertyFilter = ref<number | 'all'>('all')
 const bars = ref<CalendarBar[]>([])
 const rows = ref<CalendarRow[]>([])
+const daySummaries = ref<CalendarDaySummary[]>([])
 const apiProperties = ref<{ id: number; name: string }[]>([])
 const error = ref<string | null>(null)
 const loading = ref(false)
@@ -69,6 +71,7 @@ async function load() {
       properties: { id: number; name: string }[]
       rows: CalendarRow[]
       bars: CalendarBar[]
+      days: CalendarDaySummary[]
     }>('/api/reservations', {
       query: {
         networkId: currentNetworkId.value,
@@ -81,12 +84,14 @@ async function load() {
     apiProperties.value = res.properties
     rows.value = res.rows
     bars.value = res.bars
+    daySummaries.value = res.days ?? []
   } catch (err: unknown) {
     const e = err as { data?: { statusMessage?: string }; statusMessage?: string; message?: string }
     error.value =
       e?.data?.statusMessage ?? e?.statusMessage ?? e?.message ?? 'Unable to load calendar'
     bars.value = []
     rows.value = []
+    daySummaries.value = []
   } finally {
     loading.value = false
   }
@@ -178,6 +183,7 @@ watch([currentNetworkId, rangeStart, propertyFilter, days], () => {
       :range-start="rangeStart"
       :days="days"
       :layout="layout"
+      :day-summaries="daySummaries"
     />
   </div>
 </template>
