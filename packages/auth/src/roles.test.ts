@@ -110,6 +110,23 @@ describe('privileged action guards', () => {
     expect(canPerformAction('property_owner', 'owner_apis')).toBe(true)
   })
 
+  it('ARI writes and AI apply are manager+ only; capability admin is org_admin only', () => {
+    expect(canPerformAction('org_admin', 'ari_write')).toBe(true)
+    expect(canPerformAction('manager', 'ari_write')).toBe(true)
+    expect(canPerformAction('front_desk', 'ari_write')).toBe(false)
+    expect(canPerformAction('housekeeping', 'ari_write')).toBe(false)
+    expect(canPerformAction('accounting', 'ari_write')).toBe(false)
+    expect(canPerformAction('property_owner', 'ari_write')).toBe(false)
+
+    expect(canPerformAction('org_admin', 'ai_apply')).toBe(true)
+    expect(canPerformAction('manager', 'ai_apply')).toBe(true)
+    expect(canPerformAction('front_desk', 'ai_apply')).toBe(false)
+
+    expect(canPerformAction('org_admin', 'capability_admin')).toBe(true)
+    expect(canPerformAction('manager', 'capability_admin')).toBe(false)
+    expect(canPerformAction('front_desk', 'capability_admin')).toBe(false)
+  })
+
   it('org_admin requires 2FA; non-privileged roles do not', () => {
     expect(requiresTwoFactor('org_admin')).toBe(true)
     expect(requiresTwoFactor('manager')).toBe(false)

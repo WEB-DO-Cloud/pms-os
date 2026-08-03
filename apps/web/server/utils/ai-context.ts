@@ -2,6 +2,10 @@ import {
   principalCanAccessProperty,
   type PrincipalContext,
 } from '@pms/auth'
+import {
+  currentSnapshotVersion,
+  getNetworkCapabilities,
+} from '@pms/domain'
 import { getDomainStore, listScopedProperties } from './reservations'
 import {
   propertyCapacities,
@@ -34,6 +38,7 @@ export function buildPricingContext(
   const plans = rates.plans.filter((p) => ids.includes(p.propertyId))
   const capacities = propertyCapacities(networkId, ids)
   const store = getDomainStore(networkId)
+  const caps = getNetworkCapabilities(store, networkId)
   const live = store.reservations.filter(
     (r) =>
       ids.includes(r.propertyId) &&
@@ -59,7 +64,12 @@ export function buildPricingContext(
     capacities,
     activeReservationCount: live.length,
     freshness: rates.freshness,
+    /** Any ARI write class on — not AI apply. Generation never writes. */
     ariWriteEnabled: rates.ariWriteEnabled,
+    aiApplyEnabled: caps.aiApply,
+    rateRestrictionWrite: caps.rateRestrictionWrite,
+    baseSnapshotVersion: currentSnapshotVersion(store, networkId),
+    propertyIds: ids,
   }
 }
 
@@ -105,15 +115,28 @@ export function buildConciergeContext(
   if (!principalCanAccessProperty(principal, reservation.propertyId)) {
     throw Object.assign(new Error('Property out of scope'), { statusCode: 403 })
   }
-  const messages = store.outboundMessages
-    .filter((m) => m.reservationId === reservationId)
-    .slice(-8)
-    .map((m) => ({
-      body: m.body,
-      status: m.status,
-      createdAt: m.createdAt,
-      channel: m.channel,
-    }))
+  const messages = [
+    ...store.channelMessages
+      .filter((message) => message.reservationId === reservationId)
+      .map((message) => ({
+        body: message.body,
+        direction: message.sender,
+        status: 'received',
+        createdAt: message.receivedAt,
+        channel: message.provider ?? 'channex',
+      })),
+    ...store.outboundMessages
+      .filter((message) => message.reservationId === reservationId)
+      .map((message) => ({
+        body: message.body,
+        direction: 'property',
+        status: message.status,
+        createdAt: message.createdAt,
+        channel: message.channel,
+      })),
+  ]
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+    .slice(-12)
   const prop = getSyncStore(networkId)
     .listProperties(networkId)
     .find((p) => p.id === reservation.propertyId)
@@ -129,7 +152,7 @@ export function buildConciergeContext(
       channel: reservation.channel ?? null,
       specialRequests: null as string | null,
     },
-    recentOutbound: messages,
+    recentMessages: messages,
   }
 }
 

@@ -8,6 +8,8 @@ import {
   isPendingSync,
   toCalendarBars,
 } from '../../server/lib/reservation-query'
+import { createDirectBooking } from '../../server/utils/reservations'
+import { getSyncStore } from '../../server/utils/sync'
 
 function principal(
   overrides: Partial<Parameters<typeof buildPrincipal>[0]> = {},
@@ -37,6 +39,113 @@ function reservation(
     guestName: 'Guest',
     ...partial,
   }
+}
+
+function seedCatalogForBookingCrs(networkId = 1, propertyId = 10) {
+  const sync = getSyncStore(networkId)
+  sync.domain.networkCapabilities = [
+    {
+      networkId,
+      bookingCrsWrite: true,
+      availabilityWrite: false,
+      rateRestrictionWrite: false,
+      derivedRateWrite: false,
+      aiApply: false,
+      updatedAt: new Date().toISOString(),
+    },
+  ]
+  sync.domain.reservations = sync.domain.reservations.filter((r) => r.networkId !== networkId)
+  sync.domain.ariWriteIntents = sync.domain.ariWriteIntents.filter(
+    (i) => i.networkId !== networkId,
+  )
+  sync.domain.ratePlans = sync.domain.ratePlans.filter((p) => p.networkId !== networkId)
+
+  const prop =
+    sync.listProperties(networkId).find((p) => p.id === propertyId) ??
+    sync.upsertProperty({
+      id: propertyId,
+      networkId,
+      channexId: 'prop-uuid',
+      name: 'Casa',
+      slug: 'casa',
+      address: null,
+      city: null,
+      country: null,
+      timezone: 'UTC',
+      currency: 'USD',
+      channexTitle: 'Casa',
+      channexRaw: null,
+      sourceUpdatedAt: null,
+    })
+
+  const other =
+    sync.listProperties(networkId).find((p) => p.id === 11) ??
+    sync.upsertProperty({
+      id: 11,
+      networkId,
+      channexId: 'prop-other',
+      name: 'Other',
+      slug: 'other',
+      address: null,
+      city: null,
+      country: null,
+      timezone: 'UTC',
+      currency: 'USD',
+      channexTitle: 'Other',
+      channexRaw: null,
+      sourceUpdatedAt: null,
+    })
+
+  const room =
+    sync.listRoomTypes(networkId, propertyId).find((r) => r.channexId === 'rt-uuid') ??
+    sync.upsertRoomType({
+      networkId,
+      propertyId: prop.id,
+      channexId: 'rt-uuid',
+      name: 'Studio',
+      capacity: 2,
+      countOfRooms: 1,
+      channexRaw: null,
+      sourceUpdatedAt: null,
+    })
+
+  if (!sync.listRoomTypes(networkId, other.id).some((r) => r.channexId === 'rt-other')) {
+    sync.upsertRoomType({
+      networkId,
+      propertyId: other.id,
+      channexId: 'rt-other',
+      name: 'Other RT',
+      capacity: 2,
+      countOfRooms: 1,
+      channexRaw: null,
+      sourceUpdatedAt: null,
+    })
+  }
+
+  sync.domain.ratePlans.push({
+    networkId,
+    propertyId: prop.id,
+    channexId: 'rp-uuid',
+    roomTypeChannexId: 'rt-uuid',
+    title: 'BAR',
+    currency: 'USD',
+    parentRatePlanChannexId: null,
+    channexRaw: null,
+    pulledAt: new Date().toISOString(),
+  })
+  sync.domain.ratePlans.push({
+    networkId,
+    propertyId: other.id,
+    channexId: 'rp-other',
+    roomTypeChannexId: 'rt-other',
+    title: 'Other BAR',
+    currency: 'USD',
+    parentRatePlanChannexId: null,
+    channexRaw: null,
+    pulledAt: new Date().toISOString(),
+  })
+
+  return { sync, room }
 }
 
 describe('reservation property scope', () => {
@@ -72,6 +181,15 @@ describe('reservation property scope', () => {
 describe('pending-sync direct booking semantics', () => {
   it('failed Channex write keeps pending_sync and never looks confirmed', async () => {
     const store = createMemoryStore()
+    store.networkCapabilities.push({
+      networkId: 1,
+      bookingCrsWrite: true,
+      availabilityWrite: false,
+      rateRestrictionWrite: false,
+      derivedRateWrite: false,
+      aiApply: false,
+      updatedAt: new Date().toISOString(),
+    })
     const user = principal()
     const created = await runCommand(
       'createDirectReservation',
@@ -86,6 +204,10 @@ describe('pending-sync direct booking semantics', () => {
         checkInDate: '2026-08-01',
         checkOutDate: '2026-08-03',
         guestName: 'Direct',
+        roomTypeId: 5,
+        roomTypeChannexId: 'rt-1',
+        ratePlanChannexId: 'rp-1',
+        days: { '2026-08-01': '90.00', '2026-08-02': '90.00' },
       },
       { store },
     )
@@ -99,17 +221,31 @@ describe('pending-sync direct booking semantics', () => {
     expect(row.status).not.toBe('confirmed')
   })
 
-  it('successful write-back promotes to confirmed with Channex id', () => {
+  it('HTTP accept keeps pending until reconciled; revision confirm clears pending', () => {
     const row = reservation({
       id: 9,
       propertyId: 10,
       status: 'pending_sync',
       channexBookingId: null,
       pendingSyncReason: 'direct_booking_awaiting_channex',
+      otaReservationCode: 'PMS-1-9',
     })
-    applyWriteBackResult(row, { ok: true, channexBookingId: 'CHX-100' })
-    expect(row.status).toBe('confirmed')
+    applyWriteBackResult(row, {
+      ok: true,
+      channexBookingId: 'CHX-100',
+      reconciled: false,
+    })
+    expect(row.status).toBe('pending_sync')
     expect(row.channexBookingId).toBe('CHX-100')
+    expect(row.pendingSyncReason).toBe('awaiting_channex_revision')
+    expect(isPendingSync(row)).toBe(true)
+
+    applyWriteBackResult(row, {
+      ok: true,
+      channexBookingId: 'CHX-100',
+      reconciled: true,
+    })
+    expect(row.status).toBe('confirmed')
     expect(row.pendingSyncReason).toBeNull()
     expect(isPendingSync(row)).toBe(false)
   })
@@ -124,6 +260,137 @@ describe('pending-sync direct booking semantics', () => {
       to: '2026-07-24',
     })
     expect(week.map((r) => r.id)).toEqual([1])
+  })
+})
+
+describe('Booking CRS createDirectBooking gates', () => {
+  it('AE2: capability off → server rejects with no reservation', async () => {
+    const sync = getSyncStore(1)
+    sync.domain.networkCapabilities = []
+    await expect(
+      createDirectBooking(
+        principal(),
+        {
+          propertyId: 10,
+          checkInDate: '2026-08-10',
+          checkOutDate: '2026-08-12',
+          guestName: 'No Cap',
+          roomTypeId: 1,
+          ratePlanChannexId: 'rp-uuid',
+          days: { '2026-08-10': '100.00', '2026-08-11': '100.00' },
+          baseSnapshotVersion: 0,
+        },
+        async () => ({ ok: false, reason: 'should_not_run' }),
+      ),
+    ).rejects.toMatchObject({ statusCode: 403 })
+  })
+
+  it('rejects cross-property room type / rate plan ids', async () => {
+    const { room } = seedCatalogForBookingCrs()
+    await expect(
+      createDirectBooking(
+        principal(),
+        {
+          propertyId: 10,
+          checkInDate: '2026-08-10',
+          checkOutDate: '2026-08-12',
+          guestName: 'Cross',
+          roomTypeId: room.id,
+          ratePlanChannexId: 'rp-other',
+          days: { '2026-08-10': '100.00', '2026-08-11': '100.00' },
+          baseSnapshotVersion: 0,
+        },
+        async () => ({ ok: false, reason: 'should_not_run' }),
+      ),
+    ).rejects.toMatchObject({ statusCode: 400 })
+  })
+
+  it('idempotent double-submit same key → one reservation; HTTP accept stays pending', async () => {
+    const { room } = seedCatalogForBookingCrs()
+    const key = `test-idem-${Date.now()}`
+    const input = {
+      propertyId: 10,
+      checkInDate: '2026-08-20',
+      checkOutDate: '2026-08-22',
+      guestName: 'Idem Guest',
+      roomTypeId: room.id,
+      ratePlanChannexId: 'rp-uuid',
+      days: { '2026-08-20': '120.00', '2026-08-21': '120.00' },
+      baseSnapshotVersion: 0,
+      idempotencyKey: key,
+    }
+    const wb = async () =>
+      ({ ok: true, channexBookingId: 'bk-accepted', reconciled: false }) as const
+
+    const first = await createDirectBooking(principal(), input, wb)
+    const second = await createDirectBooking(principal(), input, wb)
+    expect(first.reservation.id).toBe(second.reservation.id)
+    expect(first.displayStatus).toBe('pending_sync')
+    expect(first.reservation.pendingSyncReason).toBe('awaiting_channex_revision')
+    expect(
+      getSyncStore(1).domain.reservations.filter(
+        (r) => r.otaReservationCode === first.reservation.otaReservationCode,
+      ),
+    ).toHaveLength(1)
+  })
+
+  it('timeout after send resumes reconciliation without second create', async () => {
+    const { room, sync } = seedCatalogForBookingCrs()
+    const key = `resume-${Date.now()}`
+    let postAttempts = 0
+    const writeBack = async (reservation: ReservationRecord) => {
+      const intent = sync.domain.ariWriteIntents.find(
+        (i) => i.idempotencyKey === `booking_crs:${reservation.otaReservationCode}`,
+      )!
+      if (intent.status === 'accepted' || intent.channexTaskIds.length > 0) {
+        return {
+          ok: true as const,
+          channexBookingId: intent.channexTaskIds[0] ?? 'bk-already-sent',
+          reconciled: false,
+        }
+      }
+      postAttempts++
+      intent.status = 'accepted'
+      intent.channexTaskIds = ['bk-already-sent']
+      return { ok: true as const, channexBookingId: 'bk-already-sent', reconciled: false }
+    }
+
+    const first = await createDirectBooking(
+      principal(),
+      {
+        propertyId: 10,
+        checkInDate: '2026-09-01',
+        checkOutDate: '2026-09-03',
+        guestName: 'Resume Guest',
+        roomTypeId: room.id,
+        ratePlanChannexId: 'rp-uuid',
+        days: { '2026-09-01': '80.00', '2026-09-02': '80.00' },
+        baseSnapshotVersion: 0,
+        idempotencyKey: key,
+      },
+      writeBack,
+    )
+    expect(first.reservation.channexBookingId).toBe('bk-already-sent')
+    expect(postAttempts).toBe(1)
+
+    const resumed = await createDirectBooking(
+      principal(),
+      {
+        propertyId: 10,
+        checkInDate: '2026-09-01',
+        checkOutDate: '2026-09-03',
+        guestName: 'Resume Guest',
+        roomTypeId: room.id,
+        ratePlanChannexId: 'rp-uuid',
+        days: { '2026-09-01': '80.00', '2026-09-02': '80.00' },
+        baseSnapshotVersion: 0,
+        idempotencyKey: key,
+      },
+      writeBack,
+    )
+    expect(resumed.reservation.id).toBe(first.reservation.id)
+    expect(postAttempts).toBe(1)
+    expect(resumed.displayStatus).toBe('pending_sync')
   })
 })
 

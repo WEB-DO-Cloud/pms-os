@@ -1,4 +1,24 @@
 <script setup lang="ts">
+type AriWriteHealth = {
+  pendingOutboxCount: number
+  acceptedUnreconciledCount: number
+  partialCount: number
+  driftedCount: number
+  retryCount: number
+  warningIntentCount: number
+  oldestAcceptedAt: string | null
+  oldestQueuedAt: string | null
+  oldestPendingBookingRevisionAt: string | null
+  stuckAcceptedAlerts: Array<{
+    propertyId: number
+    intentId: number
+    lane: string
+    ageMs: number
+    roomTypeChannexId?: string
+    ratePlanChannexId?: string
+  }>
+}
+
 type Health = {
   networkId: number
   status: string
@@ -9,6 +29,7 @@ type Health = {
   updatedAt: string
   deadLetterCount?: number
   pendingAckCount?: number
+  ariWrite?: AriWriteHealth
 }
 
 const props = defineProps<{
@@ -38,6 +59,14 @@ function tone(status: string) {
   if (status === 'warning' || status === 'running') return 'warning'
   if (status === 'failed') return 'failed'
   return 'muted'
+}
+
+function ariTone(h: AriWriteHealth | undefined) {
+  if (!h) return 'muted'
+  if (h.stuckAcceptedAlerts.length > 0 || h.driftedCount > 0) return 'failed'
+  if (h.acceptedUnreconciledCount > 0 || h.retryCount > 0 || h.partialCount > 0) return 'warning'
+  if (h.pendingOutboxCount > 0) return 'warning'
+  return 'healthy'
 }
 
 async function refresh() {
@@ -160,6 +189,44 @@ defineExpose({ refresh })
           {{ health.deadLetterCount ?? 0 }}
         </em>
       </article>
+      <article v-if="health.ariWrite">
+        <span class="health-dot" :class="ariTone(health.ariWrite)" />
+        <div>
+          <strong>ARI / Booking CRS outbox</strong>
+          <small>
+            {{ health.ariWrite.pendingOutboxCount }} pending ·
+            {{ health.ariWrite.acceptedUnreconciledCount }} accepted ·
+            {{ health.ariWrite.partialCount }} partial ·
+            {{ health.ariWrite.driftedCount }} drift ·
+            {{ health.ariWrite.retryCount }} retry ·
+            {{ health.ariWrite.warningIntentCount }} warnings
+            <template v-if="health.ariWrite.oldestAcceptedAt">
+              · oldest accepted {{ relative(health.ariWrite.oldestAcceptedAt) }}
+            </template>
+            <template v-if="health.ariWrite.oldestPendingBookingRevisionAt">
+              · oldest booking CRS {{ relative(health.ariWrite.oldestPendingBookingRevisionAt) }}
+            </template>
+          </small>
+          <small
+            v-if="health.ariWrite.stuckAcceptedAlerts.length"
+            class="alert-line"
+          >
+            Stuck accepted:
+            <template
+              v-for="(a, i) in health.ariWrite.stuckAcceptedAlerts.slice(0, 3)"
+              :key="a.intentId"
+            >
+              <template v-if="i">; </template>
+              prop {{ a.propertyId }} / {{ a.lane }} #{{ a.intentId }}
+              ({{ Math.round(a.ageMs / 60_000) }}m)
+            </template>
+            <template v-if="health.ariWrite.stuckAcceptedAlerts.length > 3">
+              +{{ health.ariWrite.stuckAcceptedAlerts.length - 3 }} more
+            </template>
+          </small>
+        </div>
+        <em :class="ariTone(health.ariWrite)">{{ health.ariWrite.pendingOutboxCount }}</em>
+      </article>
     </div>
 
     <div class="recovery">
@@ -276,6 +343,10 @@ defineExpose({ refresh })
   margin-top: 0.2rem;
   color: var(--muted);
   font-size: 0.67rem;
+}
+
+.alert-line {
+  color: var(--danger) !important;
 }
 
 .health-list em {

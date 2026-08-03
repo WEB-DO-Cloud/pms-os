@@ -12,6 +12,18 @@ import { updateGuestEnrichment } from './update-guest-enrichment'
 import { updatePropertyOps } from './update-property-ops'
 import { importLocalReviews } from './import-local-reviews'
 import { updateReviewStatus } from './update-review-status'
+import { setNetworkCapability } from './set-network-capability'
+import {
+  createCalendarNote,
+  deleteCalendarNote,
+  updateCalendarNote,
+} from './calendar-notes'
+import { setRoomTypeAvailability } from './set-room-type-availability'
+import {
+  setRatePlanNightlyRates,
+  setRatePlanRestrictions,
+} from './set-rate-plan-restrictions'
+import { updateDerivedRateModifier } from './update-derived-rate-modifier'
 import type { AnyCommandDefinition } from '../store'
 
 export const commandRegistry = {
@@ -29,6 +41,14 @@ export const commandRegistry = {
   updatePropertyOps,
   importLocalReviews,
   updateReviewStatus,
+  setNetworkCapability,
+  createCalendarNote,
+  updateCalendarNote,
+  deleteCalendarNote,
+  setRoomTypeAvailability,
+  setRatePlanRestrictions,
+  setRatePlanNightlyRates,
+  updateDerivedRateModifier,
 } as const satisfies Record<string, AnyCommandDefinition>
 
 export type CommandName = keyof typeof commandRegistry
@@ -48,6 +68,14 @@ export type CommandInputMap = {
   updatePropertyOps: import('./update-property-ops').UpdatePropertyOpsInput
   importLocalReviews: import('./import-local-reviews').ImportLocalReviewsInput
   updateReviewStatus: import('./update-review-status').UpdateReviewStatusInput
+  setNetworkCapability: import('./set-network-capability').SetNetworkCapabilityInput
+  createCalendarNote: import('./calendar-notes').CreateCalendarNoteInput
+  updateCalendarNote: import('./calendar-notes').UpdateCalendarNoteInput
+  deleteCalendarNote: import('./calendar-notes').DeleteCalendarNoteInput
+  setRoomTypeAvailability: import('./set-room-type-availability').SetRoomTypeAvailabilityInput
+  setRatePlanRestrictions: import('./set-rate-plan-restrictions').SetRatePlanRestrictionsInput
+  setRatePlanNightlyRates: import('./set-rate-plan-restrictions').SetRatePlanNightlyRatesInput
+  updateDerivedRateModifier: import('./update-derived-rate-modifier').UpdateDerivedRateModifierInput
 }
 
 export type CommandOutputMap = {
@@ -65,6 +93,14 @@ export type CommandOutputMap = {
   updatePropertyOps: import('../store').PropertyOpsRecord
   importLocalReviews: { imported: number; reviews: import('../store').ReviewRecord[] }
   updateReviewStatus: import('../store').ReviewRecord
+  setNetworkCapability: import('../store').NetworkCapabilityRecord
+  createCalendarNote: import('../store').CalendarNoteRecord
+  updateCalendarNote: import('../store').CalendarNoteRecord
+  deleteCalendarNote: import('../store').CalendarNoteRecord
+  setRoomTypeAvailability: import('./set-room-type-availability').SetRoomTypeAvailabilityResult
+  setRatePlanRestrictions: import('./set-rate-plan-restrictions').SetRatePlanRestrictionsResult
+  setRatePlanNightlyRates: import('./set-rate-plan-restrictions').SetRatePlanNightlyRatesResult
+  updateDerivedRateModifier: import('./update-derived-rate-modifier').UpdateDerivedRateModifierResult
 }
 
 export {
@@ -82,6 +118,31 @@ export {
   updatePropertyOps,
   importLocalReviews,
   updateReviewStatus,
+  setNetworkCapability,
+  createCalendarNote,
+  updateCalendarNote,
+  deleteCalendarNote,
+  setRoomTypeAvailability,
+  setRatePlanRestrictions,
+  setRatePlanNightlyRates,
+  updateDerivedRateModifier,
 }
 
 export type { ApplyChannexBookingRevisionInput } from './apply-channex-booking-revision'
+export type {
+  SetRoomTypeAvailabilityInput,
+  SetRoomTypeAvailabilityResult,
+} from './set-room-type-availability'
+export type {
+  RatePlanRestrictionFields,
+  SetRatePlanNightlyRatesInput,
+  SetRatePlanNightlyRatesResult,
+  SetRatePlanRestrictionsInput,
+  SetRatePlanRestrictionsResult,
+} from './set-rate-plan-restrictions'
+export type {
+  DerivedOptionPayload,
+  DerivedRateOp,
+  UpdateDerivedRateModifierInput,
+  UpdateDerivedRateModifierResult,
+} from './update-derived-rate-modifier'

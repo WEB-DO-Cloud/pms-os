@@ -12,6 +12,12 @@ export type RatePlanRow = {
   parityWarning: string | null
   state: 'cached' | 'unavailable' | 'cache_miss'
   cachedAt: string | null
+  rateMode?: string | null
+  parentRatePlanChannexId?: string | null
+  nightlyEditable?: boolean
+  derivedModifierEditable?: boolean
+  derivedModifierSummary?: string | null
+  channelMappingManagedInChannex?: boolean
 }
 
 defineProps<{
@@ -30,6 +36,7 @@ function money(minor: number | null, currency: string) {
   <div class="table-wrap" role="table" aria-label="Rate plans">
     <div class="head" role="row">
       <span>Property / plan</span>
+      <span>Mode</span>
       <span>Nightly</span>
       <span>Window</span>
       <span>Restrictions</span>
@@ -39,8 +46,23 @@ function money(minor: number | null, currency: string) {
       <div>
         <strong>{{ row.propertyName }}</strong>
         <p class="desc">{{ row.ratePlanName }}</p>
+        <p v-if="row.channelMappingManagedInChannex !== false" class="desc">
+          Channel mapping · Channex
+        </p>
       </div>
-      <span>{{ money(row.amountMinor, row.currency) }}</span>
+      <span>
+        <template v-if="row.rateMode">{{ row.rateMode }}</template>
+        <template v-else>—</template>
+        <em v-if="row.derivedModifierSummary" class="mod"> · {{ row.derivedModifierSummary }}</em>
+        <em v-if="row.derivedModifierEditable" class="ok"> · modifier editable</em>
+        <em v-else-if="row.parentRatePlanChannexId" class="warn"> · inherited</em>
+      </span>
+      <span>
+        {{ money(row.amountMinor, row.currency) }}
+        <em v-if="row.nightlyEditable === false && row.rateMode === 'derived'" class="warn">
+          · nightly locked
+        </em>
+      </span>
       <span>
         <template v-if="row.dateFrom && row.dateTo">{{ row.dateFrom }} → {{ row.dateTo }}</template>
         <template v-else>—</template>
@@ -67,7 +89,7 @@ function money(minor: number | null, currency: string) {
 .head,
 .row {
   display: grid;
-  grid-template-columns: 1.4fr 0.9fr 1.1fr 1.2fr 0.8fr;
+  grid-template-columns: 1.3fr 1fr 0.9fr 1fr 1.1fr 0.7fr;
   gap: 0.75rem;
   align-items: center;
   padding: 0.85rem 1.1rem;
@@ -97,6 +119,11 @@ function money(minor: number | null, currency: string) {
 }
 .warn {
   color: #e8b86d;
+  font-style: normal;
+}
+.ok,
+.mod {
+  color: var(--accent);
   font-style: normal;
 }
 .state.cached {

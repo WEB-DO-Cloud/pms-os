@@ -1,4 +1,10 @@
 <script setup lang="ts">
+import CalendarCellMenu from './CalendarCellMenu.vue'
+import type {
+  CellMenuAction,
+  CellMenuContext,
+} from './CalendarCellMenu.vue'
+
 export type CalendarBar = {
   id: number
   propertyId: number
@@ -29,13 +35,107 @@ export type CalendarRow = {
 
 export type CalendarLayout = 'horizon' | 'month'
 
+export type CalendarNote = {
+  id: number
+  propertyId: number
+  date: string
+  body: string
+}
+
+export type CalendarDaySummary = {
+  propertyId: number
+  date: string
+  capacity: number
+  booked: number
+  pendingSync: number
+  vacancy: number
+  vacancySource: 'channex' | 'reservations'
+  degraded: boolean
+  rateMinor: number | null
+  currency: string | null
+  minStay: number | null
+  stopSell: boolean
+  closedToArrival: boolean
+  closedToDeparture: boolean
+  hasRoomMapping: boolean
+  hasRateMapping: boolean
+}
+
 const props = defineProps<{
   bars: CalendarBar[]
   rows: CalendarRow[]
   rangeStart: string
   days: number
   layout?: CalendarLayout
+  daySummaries?: CalendarDaySummary[]
+  notes?: CalendarNote[]
+  /** Day-cell menu actions; absent/empty = read-only shell. */
+  buildActions?: (ctx: CellMenuContext) => CellMenuAction[]
 }>()
+
+const emit = defineEmits<{
+  cellAction: [id: string, ctx: CellMenuContext]
+}>()
+
+const propertyNameById = computed(
+  () => new Map(props.rows.map((r) => [r.propertyId, r.propertyName])),
+)
+
+const summaryByKey = computed(() => {
+  const map = new Map<string, CalendarDaySummary>()
+  for (const s of props.daySummaries ?? []) {
+    map.set(`${s.propertyId}:${s.date}`, s)
+  }
+  return map
+})
+
+function summaryFor(propertyId: number, date: string) {
+  return summaryByKey.value.get(`${propertyId}:${date}`) ?? null
+}
+
+function hasNote(propertyId: number, date: string) {
+  return (props.notes ?? []).some(
+    (n) => n.propertyId === propertyId && n.date === date,
+  )
+}
+
+const menuContext = ref<CellMenuContext | null>(null)
+const menuActions = ref<CellMenuAction[]>([])
+let menuTrigger: HTMLElement | null = null
+
+function openCellMenu(propertyId: number, date: string, event: Event) {
+  const summary = summaryFor(propertyId, date)
+  if (!summary) return
+  menuTrigger = event.currentTarget as HTMLElement
+  const ctx: CellMenuContext = {
+    ...summary,
+    propertyName:
+      propertyNameById.value.get(propertyId) ?? `Property ${propertyId}`,
+  }
+  menuActions.value = props.buildActions?.(ctx) ?? []
+  menuContext.value = ctx
+}
+
+function closeCellMenu() {
+  menuContext.value = null
+  menuTrigger?.focus()
+  menuTrigger = null
+}
+
+function onCellAction(id: string, ctx: CellMenuContext) {
+  menuContext.value = null
+  menuTrigger = null
+  emit('cellAction', id, ctx)
+}
+
+function shortMoney(minor: number | null, currency: string | null) {
+  if (minor == null) return null
+  return new Intl.NumberFormat(undefined, {
+    style: 'currency',
+    currency: currency ?? 'USD',
+    maximumFractionDigits: minor % 100 === 0 ? 0 : 2,
+  }).format(minor / 100)
+}
 
 const activeLayout = computed(() => props.layout ?? 'horizon')
 
@@ -165,6 +265,26 @@ function laneLabel(row: CalendarRow) {
           />
         </NuxtLink>
         <p v-if="barsForDay(day).length === 0" class="day-empty">—</p>
+        <div v-if="daySummaries?.length" class="day-summaries">
+          <button
+            v-for="s in (daySummaries ?? []).filter((x) => x.date === day)"
+            :key="`${s.propertyId}-${day}`"
+            type="button"
+            class="summary-chip"
+            :class="{ degraded: s.degraded }"
+            :aria-label="`Day actions: ${propertyNameById.get(s.propertyId) ?? s.propertyId} ${day}`"
+            @click="openCellMenu(s.propertyId, day, $event)"
+          >
+            <span class="chip-prop">{{ propertyNameById.get(s.propertyId) }}</span>
+            <span>
+              {{ s.vacancy }} open<template v-if="s.degraded">*</template>
+              <template v-if="shortMoney(s.rateMinor, s.currency)">
+                · {{ shortMoney(s.rateMinor, s.currency) }}
+              </template>
+              <template v-if="s.stopSell"> · stop sell</template>
+            </span>
+          </button>
+        </div>
       </div>
     </div>
 
@@ -193,7 +313,32 @@ function laneLabel(row: CalendarRow) {
         :style="gridStyle"
       >
         <div class="group-label">{{ block.name }}</div>
-        <div v-for="day in dates" :key="day" class="group-pad" />
+        <div v-for="day in dates" :key="day" class="group-pad">
+          <template v-for="s in [summaryFor(block.propertyId, day)]" :key="`s-${day}`">
+            <button
+              v-if="s"
+              type="button"
+              class="summary-cell"
+              :class="{ degraded: s.degraded }"
+              :aria-label="`Day actions: ${block.name} ${day}`"
+              @click="openCellMenu(block.propertyId, day, $event)"
+            >
+              <strong>{{ s.vacancy }}</strong>
+              <span v-if="shortMoney(s.rateMinor, s.currency)" class="rate">
+                {{ shortMoney(s.rateMinor, s.currency) }}
+              </span>
+              <span v-if="s.stopSell" class="marker" title="Stop sell">⛔</span>
+              <span
+                v-else-if="s.closedToArrival || s.closedToDeparture"
+                class="marker"
+                title="Arrival/departure restricted"
+              >
+                ▲
+              </span>
+              <span v-if="hasNote(block.propertyId, day)" class="marker" title="Note">📝</span>
+            </button>
+          </template>
+        </div>
       </div>
       <div
         v-else-if="block.type === 'roomType'"
@@ -239,6 +384,13 @@ function laneLabel(row: CalendarRow) {
       No reservations in this range.
     </p>
   </div>
+
+  <CalendarCellMenu
+    :context="menuContext"
+    :actions="menuActions"
+    @close="closeCellMenu"
+    @action="onCellAction"
+  />
 </template>
 
 <style scoped>
@@ -327,6 +479,70 @@ function laneLabel(row: CalendarRow) {
 
 .group-pad {
   border-left: 1px solid transparent;
+  display: flex;
+  align-items: stretch;
+}
+
+.summary-cell {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  padding: 0.1rem 0.15rem;
+  border: none;
+  border-radius: 0.3rem;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.58rem;
+  cursor: pointer;
+}
+
+.summary-cell:hover,
+.summary-cell:focus-visible {
+  background: rgba(101, 213, 174, 0.12);
+}
+
+.summary-cell strong {
+  color: var(--accent-strong);
+  font-size: 0.68rem;
+}
+
+.summary-cell.degraded strong {
+  color: var(--warning);
+}
+
+.summary-cell .rate {
+  color: var(--ink);
+}
+
+.summary-cell .marker {
+  font-size: 0.55rem;
+}
+
+.day-summaries {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.summary-chip {
+  display: grid;
+  gap: 0.1rem;
+  padding: 0.3rem 0.4rem;
+  border: 1px dashed var(--line);
+  border-radius: 0.35rem;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.62rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.summary-chip.degraded {
+  border-color: rgba(241, 185, 111, 0.4);
 }
 
 .lane {

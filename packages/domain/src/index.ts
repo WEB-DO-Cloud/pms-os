@@ -24,8 +24,10 @@ import {
   createMemoryStore,
   defaultGates,
   type CommandDeps,
+  type ConversationReadRecord,
   type DomainStore,
   type GateFns,
+  type ChannelMessageRecord,
   type GuestRecord,
   type LedgerRecord,
   type OutboundMessageRecord,
@@ -76,6 +78,16 @@ import {
   updateRule,
 } from './automation'
 import { assignPhysicalRoom, staysOverlap } from './assign-physical-room'
+import {
+  assertCapability,
+  assertFreshSnapshot,
+  assertValidDateRange,
+  cancelQueuedIntent,
+  currentSnapshotVersion,
+  enqueueAriIntent,
+  propertyLocalToday,
+} from './ari'
+import { CAPABILITY_KEYS, getNetworkCapabilities } from './store'
 
 export const packageName = '@pms/domain' as const
 
@@ -126,6 +138,16 @@ export {
   // physical room assignment
   assignPhysicalRoom,
   staysOverlap,
+  // ARI write foundation (calendar ARI editor U1)
+  assertCapability,
+  assertFreshSnapshot,
+  assertValidDateRange,
+  cancelQueuedIntent,
+  currentSnapshotVersion,
+  enqueueAriIntent,
+  propertyLocalToday,
+  getNetworkCapabilities,
+  CAPABILITY_KEYS,
 }
 
 export type {
@@ -151,6 +173,8 @@ export type {
   ReservationRecord,
   LedgerRecord,
   OutboundMessageRecord,
+  ChannelMessageRecord,
+  ConversationReadRecord,
   PendingApprovalRecord,
   GuestRecord,
   PropertyOpsRecord,
@@ -160,6 +184,18 @@ export type {
   TaskStatus,
   LedgerType,
 }
+export type {
+  AriAvailabilityRecord,
+  AriRestrictionRecord,
+  AriWriteIntentRecord,
+  AriWriteLane,
+  AriWriteStatus,
+  CalendarNoteRecord,
+  CapabilityKey,
+  NetworkCapabilityRecord,
+  RatePlanRecord,
+} from './store'
+export type { EnqueueAriIntentInput } from './ari'
 export type {
   AutomationTrigger,
   AutomationCondition,
@@ -171,6 +207,42 @@ export type {
 } from './automation'
 
 export type { ApplyChannexBookingRevisionInput } from './commands'
+export type {
+  SetRoomTypeAvailabilityInput,
+  SetRoomTypeAvailabilityResult,
+  RatePlanRestrictionFields,
+  SetRatePlanRestrictionsInput,
+  SetRatePlanRestrictionsResult,
+  SetRatePlanNightlyRatesInput,
+  SetRatePlanNightlyRatesResult,
+  DerivedOptionPayload,
+  DerivedRateOp,
+  UpdateDerivedRateModifierInput,
+  UpdateDerivedRateModifierResult,
+} from './commands'
+export {
+  offlineReservationCode,
+  splitGuestName,
+  stayNightDates,
+  assertRoomTypeVacancy,
+  type CreateDirectReservationInput,
+} from './commands/create-direct-reservation'
+export {
+  availabilityIdempotencyKey,
+  supersedeOverlappingQueuedAvailability,
+} from './commands/set-room-type-availability'
+export {
+  assertNightlyRateEditable,
+  resolveRateMode,
+  restrictionsIdempotencyKey,
+  supersedeOverlappingQueuedRestrictions,
+} from './commands/set-rate-plan-restrictions'
+export {
+  assertDerivedRateEditable,
+  DERIVED_RATE_OPS,
+  derivedModifierIdempotencyKey,
+  supersedeQueuedDerivedModifier,
+} from './commands/update-derived-rate-modifier'
 export type {
   ReportSummary,
   ReportFilters,

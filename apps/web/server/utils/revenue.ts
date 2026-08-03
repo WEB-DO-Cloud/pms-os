@@ -8,13 +8,13 @@ import {
   computeReportSummary,
   projectRatesReadOnly,
   runCommand,
+  getNetworkCapabilities,
   type DomainStore,
   type LedgerRecord,
   type LedgerType,
   type RateCacheRow,
   type ReservationRecord,
 } from '@pms/domain'
-import { fixtureRateCache } from '@pms/sync'
 import {
   commandCtx,
   getDomainStore,
@@ -25,8 +25,8 @@ import { getSyncStore } from './sync'
 /**
  * Rates / Reports / Payments (U10).
  *
- * ponytail: same process-memory SyncStore.domain as U8/U9. Rates use fixture ARI
- * cache until live Channex ARI pull exists.
+ * ponytail: same process-memory SyncStore.domain as U8/U9. Rates project from
+ * the live Channex ARI pull (pull-ari.ts); fixtures are test data only.
  */
 
 export function requireRevenueModule(
@@ -61,7 +61,55 @@ export function setRateCacheForNetwork(
 export function getRateCache(networkId: number, propertyIds: number[]): RateCacheRow[] {
   const override = rateCacheByNetwork.get(networkId)
   if (override) return override.filter((r) => propertyIds.includes(r.propertyId))
-  return fixtureRateCache(propertyIds)
+  return projectLiveRateCache(
+    getSyncStore(networkId).domain,
+    networkId,
+    propertyIds,
+  )
+}
+
+/**
+ * Summarize the live ARI restriction projection into the read-only rates
+ * contract: one row per rate plan, representative values from today's (or the
+ * earliest projected) date. Plans without projected dates surface as cache_miss.
+ */
+export function projectLiveRateCache(
+  domain: Pick<DomainStore, 'ariRestrictions' | 'ratePlans'>,
+  networkId: number,
+  propertyIds: number[],
+  today = new Date().toISOString().slice(0, 10),
+): RateCacheRow[] {
+  const scoped = new Set(propertyIds)
+  const rowsByPlan = new Map<string, typeof domain.ariRestrictions>()
+  for (const row of domain.ariRestrictions) {
+    if (row.networkId !== networkId || !scoped.has(row.propertyId)) continue
+    const list = rowsByPlan.get(row.ratePlanChannexId) ?? []
+    list.push(row)
+    rowsByPlan.set(row.ratePlanChannexId, list)
+  }
+
+  const out: RateCacheRow[] = []
+  for (const plan of domain.ratePlans) {
+    if (plan.networkId !== networkId || !scoped.has(plan.propertyId)) continue
+    const rows = (rowsByPlan.get(plan.channexId) ?? [])
+      .slice()
+      .sort((a, b) => a.date.localeCompare(b.date))
+    const rep = rows.find((r) => r.date >= today) ?? rows[0]
+    out.push({
+      propertyId: plan.propertyId,
+      ratePlanId: plan.channexId,
+      ratePlanName: plan.title,
+      currency: plan.currency ?? 'USD',
+      amountMinor: rep?.rateMinor ?? null,
+      dateFrom: rows[0]?.date ?? '',
+      dateTo: rows[rows.length - 1]?.date ?? '',
+      minStay: rep?.minStayArrival ?? null,
+      stopSell: rep?.stopSell ?? false,
+      parityWarning: null,
+      cachedAt: rep?.pulledAt ?? null,
+    })
+  }
+  return out
 }
 
 export function ratesPayload(networkId: number, principal: PrincipalContext) {
@@ -70,15 +118,40 @@ export function ratesPayload(networkId: number, principal: PrincipalContext) {
     id: p.id,
     name: p.name,
   }))
+  const store = getDomainStore(networkId)
   const cache = getRateCache(
     networkId,
     properties.map((p) => p.id),
   )
+  // Enrich cache rows with rate_mode from catalog when projecting.
+  const catalog = store.ratePlans.filter((p) => p.networkId === networkId)
+  const byPlan = new Map(catalog.map((p) => [p.channexId, p]))
+  const enriched = cache.map((row) => {
+    const plan = byPlan.get(row.ratePlanId)
+    if (!plan) return row
+    const raw = plan.channexRaw as { rate_mode?: string } | null
+    return {
+      ...row,
+      rateMode: raw?.rate_mode ?? null,
+      parentRatePlanChannexId: plan.parentRatePlanChannexId,
+    }
+  })
+  const caps = getNetworkCapabilities(store, networkId)
   return projectRatesReadOnly(
     principal,
     properties,
-    cache,
+    enriched,
     syncFreshness(networkId),
+    Date.now(),
+    {
+      capabilities: {
+        rateRestrictionWrite: caps.rateRestrictionWrite,
+        derivedRateWrite: caps.derivedRateWrite,
+        availabilityWrite: caps.availabilityWrite,
+        aiApply: caps.aiApply,
+      },
+      ratePlans: catalog,
+    },
   )
 }
 

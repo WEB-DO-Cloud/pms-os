@@ -1,4 +1,5 @@
 import { principalCanAccessModule } from '@pms/auth'
+import { currentSnapshotVersion, getNetworkCapabilities } from '@pms/domain'
 import { requirePrincipal } from '../../utils/auth'
 import {
   isHotelPropertyType,
@@ -6,6 +7,7 @@ import {
 } from '../../utils/billing'
 import { parseNetworkId } from '../../utils/integrations'
 import {
+  buildCalendarDaySummaries,
   buildCalendarProjection,
   filterReservationsForPrincipal,
   getDomainStore,
@@ -37,6 +39,7 @@ export default defineEventHandler(async (event) => {
   const store = getDomainStore(networkId)
   const sync = getSyncStore(networkId)
   const properties = listScopedProperties(networkId, principal)
+  const capabilities = getNetworkCapabilities(store, networkId)
   const reservations = filterReservationsForPrincipal(
     store.reservations,
     principal,
@@ -56,14 +59,34 @@ export default defineEventHandler(async (event) => {
     updatedAt: h.updatedAt,
   }
 
+  const catalogRoomTypes = sync.listRoomTypes(networkId).map((rt) => ({
+    id: rt.id,
+    propertyId: rt.propertyId,
+    name: rt.name,
+    channexId: rt.channexId,
+  }))
+  const catalogRatePlans = store.ratePlans
+    .filter((p) => p.networkId === networkId)
+    .map((p) => {
+      const raw = p.channexRaw as { rate_mode?: string } | null
+      return {
+        channexId: p.channexId,
+        propertyId: p.propertyId,
+        title: p.title,
+        roomTypeChannexId: p.roomTypeChannexId,
+        currency: p.currency,
+        rateMode: raw?.rate_mode ?? null,
+        parentRatePlanChannexId: p.parentRatePlanChannexId,
+      }
+    })
+
   if (q.view === 'calendar') {
     const calendarProperties = properties.map((p) => ({
       id: p.id,
       name: p.name,
       isHotel: isHotelPropertyType(propertyTypeFromRaw(p.channexRaw)),
     }))
-    const roomTypes = sync.listRoomTypes(networkId)
-    const roomTypeName = new Map(roomTypes.map((rt) => [rt.id, rt.name]))
+    const roomTypeName = new Map(catalogRoomTypes.map((rt) => [rt.id, rt.name]))
     const rooms = sync
       .listPhysicalRooms(networkId)
       .filter((r) => properties.some((p) => p.id === r.propertyId))
@@ -89,11 +112,58 @@ export default defineEventHandler(async (event) => {
       reservations,
     )
 
+    const from = typeof q.from === 'string' ? q.from : undefined
+    const to = typeof q.to === 'string' ? q.to : undefined
+    const dates: string[] = []
+    if (from && to) {
+      const cursor = new Date(`${from}T00:00:00Z`)
+      const end = new Date(`${to}T00:00:00Z`)
+      while (cursor < end && dates.length < 62) {
+        dates.push(cursor.toISOString().slice(0, 10))
+        cursor.setUTCDate(cursor.getUTCDate() + 1)
+      }
+    }
+    const scopedIds = new Set(scopedProperties.map((p) => p.id))
+    const days = buildCalendarDaySummaries(
+      scopedProperties,
+      rooms,
+      reservations,
+      {
+        availability: store.ariAvailability.filter(
+          (a) => a.networkId === networkId && scopedIds.has(a.propertyId),
+        ),
+        restrictions: store.ariRestrictions.filter(
+          (r) => r.networkId === networkId && scopedIds.has(r.propertyId),
+        ),
+        ratePlans: store.ratePlans.filter(
+          (p) => p.networkId === networkId && scopedIds.has(p.propertyId),
+        ),
+      },
+      dates,
+    )
+
     return {
       networkId,
       properties: scopedProperties.map((p) => ({ id: p.id, name: p.name })),
       rows,
       bars,
+      days,
+      notes: store.calendarNotes.filter(
+        (n) =>
+          n.networkId === networkId &&
+          scopedIds.has(n.propertyId) &&
+          (!from || n.date >= from) &&
+          (!to || n.date < to),
+      ),
+      roomTypes: catalogRoomTypes.filter((rt) => scopedIds.has(rt.propertyId)),
+      ratePlans: catalogRatePlans.filter((p) => scopedIds.has(p.propertyId)),
+      capabilities: {
+        bookingCrsWrite: capabilities.bookingCrsWrite,
+        availabilityWrite: capabilities.availabilityWrite,
+        rateRestrictionWrite: capabilities.rateRestrictionWrite,
+        derivedRateWrite: capabilities.derivedRateWrite,
+      },
+      snapshotVersion: currentSnapshotVersion(store, networkId),
       // Legacy property-only bars kept for older clients/tests.
       legacyBars: toCalendarBars(reservations, properties),
       freshness,
@@ -105,6 +175,15 @@ export default defineEventHandler(async (event) => {
     networkId,
     properties: properties.map((p) => ({ id: p.id, name: p.name })),
     reservations,
+    roomTypes: catalogRoomTypes,
+    ratePlans: catalogRatePlans,
+    capabilities: {
+      bookingCrsWrite: capabilities.bookingCrsWrite,
+      availabilityWrite: capabilities.availabilityWrite,
+      rateRestrictionWrite: capabilities.rateRestrictionWrite,
+      derivedRateWrite: capabilities.derivedRateWrite,
+    },
+    snapshotVersion: currentSnapshotVersion(store, networkId),
     freshness,
   }
 })

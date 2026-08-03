@@ -36,6 +36,7 @@ export function mapChannexBookingRevision(
     currency: attrs.currency ?? 'USD',
     payload: raw,
     roomTypeId,
+    otaReservationCode: attrs.ota_reservation_code ?? null,
   }
 
   return { ok: true, input }

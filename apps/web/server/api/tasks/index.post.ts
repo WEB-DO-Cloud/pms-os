@@ -20,6 +20,7 @@ export default defineEventHandler(async (event) => {
     description?: string
     reservationId?: number
     assignedToUserId?: string | null
+    dueDate?: string | null
   }>(event)
   const networkId = parseNetworkId(body.networkId)
   const { principal } = await requirePrincipal(event, networkId)
@@ -45,6 +46,7 @@ export default defineEventHandler(async (event) => {
       description: body.description,
       reservationId: body.reservationId,
       assignedToUserId: body.assignedToUserId,
+      dueDate: body.dueDate,
     },
   )
 

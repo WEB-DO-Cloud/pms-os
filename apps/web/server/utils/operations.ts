@@ -148,7 +148,7 @@ export async function runOpsCommand<
 >(
   name: N,
   principal: PrincipalContext,
-  propertyId: number,
+  propertyId: number | undefined,
   input: Parameters<typeof runCommand<N>>[2],
 ) {
   if (principal.networkId == null) {
@@ -166,7 +166,8 @@ export async function runOpsCommand<
     throw createError({
       statusCode:
         code === 'PROPERTY_SCOPE' ||
-        code === 'MODULE' ||
+        code === 'MODULE_DENIED' ||
+        code === 'ACTION_DENIED' ||
         code === 'NETWORK_SCOPE'
           ? 403
           : code === 'NOT_FOUND'

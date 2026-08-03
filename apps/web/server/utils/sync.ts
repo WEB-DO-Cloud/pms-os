@@ -1,14 +1,19 @@
 import {
   authorizeInternalSync,
+  aggregateAriWriteHealth,
   createChannexClient,
   createMemorySyncStore,
   encryptSecret,
   fetchAndApplyRevision,
   markSyncHealthy,
   processAckOutbox,
+  processAriWriteOutbox,
+  processBookingCrsOutbox,
   resolveSecret,
+  runAriPull,
   runBookingRevisionPull,
   runCatalogImport,
+  runMessagePull,
   toPublicSyncHealth,
   verifyChannexWebhook,
   extractRevisionIdFromWebhook,
@@ -22,6 +27,7 @@ import { isCommercialEdition } from './edition'
 
 const stores = new Map<number, SyncStore>()
 const hydrated = new Set<number>()
+const catalogHydrated = new Set<number>()
 
 export function getSyncStore(networkId: number): SyncStore {
   let store = stores.get(networkId)
@@ -71,7 +77,33 @@ export async function ensureSecretsHydrated(networkId: number): Promise<SyncStor
     // optional
   }
 
+  // Durable ARI state (capabilities, write intents, projections, notes) — the
+  // memory store is a cache; PG rows survive restarts (R15).
+  if (process.env.DATABASE_URL) {
+    try {
+      const { hydrateAriState } = await import('../lib/ari-persistence')
+      await hydrateAriState(getDb(), store.domain, networkId)
+    } catch {
+      // Missing migration / unit tests without PG — memory-only still works.
+    }
+  }
+
   hydrated.add(networkId)
+
+  // Self-heal the catalog: the memory store starts empty after every restart,
+  // so re-import properties/room types from Channex on first touch.
+  // ponytail: once per process — if Channex is down on first try, the manual
+  // Settings → Integrations import (or a restart) is the retry path.
+  if (!catalogHydrated.has(networkId)) {
+    catalogHydrated.add(networkId)
+    if (store.listProperties(networkId).length === 0) {
+      try {
+        await runInternalImport(networkId)
+      } catch {
+        // No Channex key/group configured yet — pages keep their empty states.
+      }
+    }
+  }
   return store
 }
 
@@ -94,6 +126,31 @@ export function getChannexClientForNetwork(store: SyncStore, networkId: number) 
   }
   const apiKey = resolveSecret(row)
   return createChannexClient({ apiKey })
+}
+
+export async function getScopedChannexMessagingClient(
+  networkId: number,
+  propertyId: number,
+) {
+  const store = await ensureSecretsHydrated(networkId)
+  const property = store
+    .listProperties(networkId)
+    .find((candidate) => candidate.id === propertyId)
+  if (!property) {
+    throw createError({ statusCode: 404, statusMessage: 'Property not found' })
+  }
+  const client = getChannexClientForNetwork(store, networkId)
+  if (isCommercialEdition()) {
+    const groupId = await getNetworkChannexGroupId(networkId)
+    if (!groupId) {
+      throw createError({ statusCode: 403, statusMessage: 'Channex group not configured' })
+    }
+    const allowed = await client.listGroupPropertyIds(groupId)
+    if (!allowed.includes(property.channexId)) {
+      throw createError({ statusCode: 403, statusMessage: 'Channex property out of scope' })
+    }
+  }
+  return { client, property }
 }
 
 export async function requireInternalSyncAuth(
@@ -145,6 +202,28 @@ export async function handleChannexWebhook(
   const revisionId = extractRevisionIdFromWebhook(verified.payload)
   markSyncHealthy(store, networkId, { lastWebhookAt: new Date().toISOString() })
 
+  if (verified.payload.event === 'ari') {
+    // ARI changed at Channex — targeted re-pull, never a direct projection write
+    // from webhook values (out-of-order deliveries would corrupt the snapshot).
+    const channexPropertyId =
+      verified.payload.payload?.property_id ?? verified.payload.property_id
+    const property = channexPropertyId
+      ? store.findPropertyByChannexId(networkId, channexPropertyId)
+      : null
+    const result = await runInternalAriPull(
+      networkId,
+      property ? { propertyId: property.id } : undefined,
+    )
+    return { status: 'processed', result }
+  }
+
+  if (verified.payload.event === 'message') {
+    // Guest chat message registered at Channex — pull threads into the Inbox.
+    const client = getChannexClientForNetwork(store, networkId)
+    const result = await runMessagePull(store, client, networkId, `webhook-${Date.now()}`)
+    return { status: 'processed', result }
+  }
+
   if (!revisionId) {
     return { status: 'ignored', reason: 'no_revision_id' }
   }
@@ -161,23 +240,104 @@ export async function publicSyncHealth(networkId: number, includeErrorDetail = f
   const pendingAckCount = store.domain.ackOutbox.filter(
     (a) => a.networkId === networkId && a.status !== 'sent',
   ).length
+  const ariWrite = aggregateAriWriteHealth(store.domain, networkId)
   return toPublicSyncHealth(health, {
     includeErrorDetail,
     deadLetterCount,
     pendingAckCount,
+    ariWrite,
   })
 }
 
 export async function runInternalPull(networkId: number) {
   const store = await ensureSecretsHydrated(networkId)
   const client = getChannexClientForNetwork(store, networkId)
-  return runBookingRevisionPull(store, client, networkId, `web-${Date.now()}`)
+  const pull = await runBookingRevisionPull(store, client, networkId, `web-${Date.now()}`)
+  // Chat messages ride the same worker tick; app-not-installed is a silent skip.
+  let messages
+  try {
+    messages = await runMessagePull(store, client, networkId, `web-${Date.now()}`)
+  } catch (err) {
+    messages = { skipped: true as const, reason: err instanceof Error ? err.message : 'error' }
+  }
+  // Live ARI projection rides the same tick; failures never block booking sync.
+  let ari
+  try {
+    ari = await runInternalAriPull(networkId)
+  } catch (err) {
+    ari = { skipped: true as const, reason: err instanceof Error ? err.message : 'error' }
+  }
+  return { ...pull, messages, ari }
+}
+
+/**
+ * Pull Channex ARI into the in-memory projection and write changed rows
+ * through to PG so snapshot versions survive restarts.
+ */
+export async function runInternalAriPull(
+  networkId: number,
+  opts?: { propertyId?: number; dateFrom?: string; dateTo?: string },
+) {
+  const store = await ensureSecretsHydrated(networkId)
+  const client = getChannexClientForNetwork(store, networkId)
+  const result = await runAriPull(store, client, networkId, `web-${Date.now()}`, opts)
+  if (!result.skipped && result.changed > 0 && process.env.DATABASE_URL) {
+    try {
+      const { persistAriProjection } = await import('../lib/ari-persistence')
+      const changedAvailability = store.domain.ariAvailability.filter(
+        (a) => a.networkId === networkId && a.snapshotVersion === result.snapshotVersion,
+      )
+      const changedRestrictions = store.domain.ariRestrictions.filter(
+        (r) => r.networkId === networkId && r.snapshotVersion === result.snapshotVersion,
+      )
+      await persistAriProjection(getDb(), networkId, changedAvailability, changedRestrictions)
+    } catch {
+      // Best-effort: memory projection still serves reads; next pull retries.
+    }
+  }
+  return result
+}
+
+export async function runInternalMessagePull(networkId: number) {
+  const store = await ensureSecretsHydrated(networkId)
+  const client = getChannexClientForNetwork(store, networkId)
+  return runMessagePull(store, client, networkId, `inbox-${Date.now()}`)
 }
 
 export async function runInternalAck(networkId: number) {
   const store = await ensureSecretsHydrated(networkId)
   const client = getChannexClientForNetwork(store, networkId)
   return processAckOutbox(store, client, networkId)
+}
+
+/** Drain ARI + booking_crs write intents for a network (http worker cycle). */
+export async function runInternalAriWrite(networkId: number) {
+  const store = await ensureSecretsHydrated(networkId)
+  const client = getChannexClientForNetwork(store, networkId)
+  const result = await processAriWriteOutbox(store, client, networkId)
+  const bookingCrs = await processBookingCrsOutbox(store, client, networkId)
+  // ponytail: best-effort PG status write-through; memory is authoritative in-process.
+  if (
+    process.env.DATABASE_URL &&
+    (result.processed > 0 || bookingCrs.processed > 0)
+  ) {
+    try {
+      const { persistAriIntentStatus } = await import('../lib/ari-persistence')
+      for (const intent of store.domain.ariWriteIntents.filter(
+        (i) =>
+          i.networkId === networkId &&
+          (i.lane === 'availability' ||
+            i.lane === 'restrictions' ||
+            i.lane === 'rate_plan' ||
+            i.lane === 'booking_crs'),
+      )) {
+        await persistAriIntentStatus(getDb(), intent)
+      }
+    } catch {
+      // Missing migration / unit tests without PG.
+    }
+  }
+  return { ...result, bookingCrs }
 }
 
 export async function runInternalImport(networkId: number) {

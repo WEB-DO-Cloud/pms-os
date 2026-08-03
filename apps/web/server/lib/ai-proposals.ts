@@ -9,14 +9,31 @@ export const AiProposalKinds = [
 
 export type AiProposalKind = (typeof AiProposalKinds)[number]
 
+/** Lifecycle statuses. Apply outcomes for AI rate writes are tracked separately from generation. */
 export const AiProposalStatuses = [
   'pending',
   'dismissed',
   'accepted_local',
   'applied',
+  'queued',
+  'reconciled',
+  'partial',
+  'failed',
+  'stale',
 ] as const
 
 export type AiProposalStatus = (typeof AiProposalStatuses)[number]
+
+export const AiApplyRowOutcomes = [
+  'queued',
+  'reconciled',
+  'partial',
+  'failed',
+  'stale',
+  'skipped',
+] as const
+
+export type AiApplyRowOutcomeStatus = (typeof AiApplyRowOutcomes)[number]
 
 export type AiProposalRecord = {
   id: string
@@ -87,6 +104,7 @@ export function updateAiProposalStatus(
   id: string,
   status: AiProposalStatus,
   resolutionNote?: string | null,
+  payload?: unknown,
 ): AiProposalRecord {
   const row = list(networkId).find((r) => r.id === id)
   if (!row) {
@@ -94,22 +112,46 @@ export function updateAiProposalStatus(
   }
   row.status = status
   if (resolutionNote !== undefined) row.resolutionNote = resolutionNote
+  if (payload !== undefined) row.payload = payload
   return { ...row }
 }
 
 /** Zod schemas for model output (shared by APIs + tests). */
+export const pricingSuggestionRowSchema = z.object({
+  propertyId: z.number(),
+  ratePlanId: z.string(),
+  dateFrom: z.string(),
+  dateTo: z.string(),
+  amountMinor: z.number().int(),
+  currency: z.string().optional(),
+  rationale: z.string(),
+  confidence: z.number().min(0).max(1),
+})
+
 export const pricingSuggestionSchema = z.object({
-  suggestions: z.array(
-    z.object({
-      propertyId: z.number(),
-      ratePlanId: z.string(),
-      dateFrom: z.string(),
-      dateTo: z.string(),
-      amountMinor: z.number().int(),
-      rationale: z.string(),
-      confidence: z.number().min(0).max(1),
-    }),
-  ),
+  suggestions: z.array(pricingSuggestionRowSchema),
+})
+
+/** Stored pricing proposal: model rows + snapshot binding for AE8 stale checks. */
+export const pricingProposalPayloadSchema = z.object({
+  suggestions: z.array(pricingSuggestionRowSchema),
+  baseSnapshotVersion: z.number().int().nonnegative(),
+  propertyIds: z.array(z.number()),
+  /** True when network aiApply was on at generation — never means generation wrote. */
+  aiApplyEnabled: z.boolean().default(false),
+  /** Generation never queues ARI writes; always false on suggest. */
+  ariWriteEnabled: z.literal(false).default(false),
+  note: z.string().optional(),
+  applyOutcomes: z
+    .array(
+      z.object({
+        index: z.number().int().nonnegative(),
+        status: z.enum(AiApplyRowOutcomes),
+        intentId: z.number().int().optional(),
+        error: z.string().optional(),
+      }),
+    )
+    .optional(),
 })
 
 export const forecastSchema = z.object({
@@ -140,6 +182,7 @@ export const opsScheduleSchema = z.object({
 })
 
 export type PricingSuggestionPayload = z.infer<typeof pricingSuggestionSchema>
+export type PricingProposalPayload = z.infer<typeof pricingProposalPayloadSchema>
 export type ForecastPayload = z.infer<typeof forecastSchema>
 export type ConciergeDraftPayload = z.infer<typeof conciergeDraftSchema>
 export type OpsSchedulePayload = z.infer<typeof opsScheduleSchema>

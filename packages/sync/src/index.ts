@@ -27,12 +27,19 @@ export {
 export type { WebhookVerifyResult, WebhookHandleResult } from './webhooks'
 
 export {
+  ACCEPTED_ALERT_AGE_MS,
+  aggregateAriWriteHealth,
   toPublicSyncHealth,
   markSyncRunning,
   markSyncHealthy,
   markSyncFailed,
 } from './sync-health'
-export type { SyncHealthPublic } from './sync-health'
+export type {
+  SyncHealthPublic,
+  AriWriteHealthMetrics,
+  AriWritePropertyHealth,
+  AriWriteStuckAlert,
+} from './sync-health'
 
 export {
   resolveSecret,
@@ -46,6 +53,32 @@ export type { EncryptedSecret, NetworkSecretMaterial, SecretPublicStatus } from 
 export { runCatalogImport } from './jobs/import-catalog'
 export { runBookingRevisionPull } from './jobs/pull-booking-revisions'
 export { processAckOutbox } from './jobs/process-ack-outbox'
+export {
+  processAriWriteOutbox,
+  type AriWriteOutboxResult,
+} from './jobs/process-ari-write-outbox'
+export {
+  processBookingCrsOutbox,
+  sendOrResumeBookingCrsIntent,
+  bookingCrsCreateBody,
+  type BookingCrsOutboxResult,
+  type BookingCrsSendResult,
+  type BookingCrsIntentPayload,
+} from './jobs/process-booking-crs-outbox'
+export { channexTimestamp, runMessagePull } from './jobs/pull-messages'
+export {
+  ARI_RESTRICTION_FIELDS,
+  channexRateToMinor,
+  runAriPull,
+  type AriPullResult,
+} from './jobs/pull-ari'
+export {
+  detectAriDrift,
+  dateHasOpenStaffIntent,
+  type AriDriftDetectResult,
+  type AriDriftRecord,
+} from './jobs/detect-ari-drift'
+export type { MessagePullResult } from './jobs/pull-messages'
 
 export { authorizeInternalSync, verifyInternalSecret, isManagerRole } from './internal-auth'
 export type { InternalAuthPrincipal } from './internal-auth'

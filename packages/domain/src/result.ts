@@ -10,6 +10,10 @@ export type CommandErrorCode =
   | 'VALIDATION'
   | 'CONFLICT'
   | 'DRY_RUN'
+  /** Per-network operational write gate is off (KTD7). */
+  | 'CAPABILITY_OFF'
+  /** Editor snapshot version no longer matches reconciled projection (KTD6). */
+  | 'STALE_SNAPSHOT'
 
 export type CommandError = {
   code: CommandErrorCode

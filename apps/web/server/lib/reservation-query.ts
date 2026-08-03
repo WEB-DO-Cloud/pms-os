@@ -29,24 +29,30 @@ export function filterReservationsForPrincipal(
 }
 
 export type DirectBookingWriteBackResult =
-  | { ok: true; channexBookingId: string }
+  | { ok: true; channexBookingId: string; reconciled: boolean }
   | { ok: false; reason: string }
 
 /**
  * Apply Channex write-back outcome onto a pending direct booking.
- * Failed writes must remain pending_sync — never silently confirmed.
+ * HTTP acceptance alone must not confirm (AE3) — set reconciled:true only
+ * after a matching booking revision commits.
  */
 export function applyWriteBackResult(
   reservation: ReservationRecord,
   result: DirectBookingWriteBackResult,
 ): ReservationRecord {
-  if (result.ok) {
-    reservation.channexBookingId = result.channexBookingId
+  if (!result.ok) {
+    reservation.status = 'pending_sync'
+    reservation.pendingSyncReason = result.reason
+    return reservation
+  }
+  reservation.channexBookingId = result.channexBookingId
+  if (result.reconciled) {
     reservation.status = 'confirmed'
     reservation.pendingSyncReason = null
   } else {
     reservation.status = 'pending_sync'
-    reservation.pendingSyncReason = result.reason
+    reservation.pendingSyncReason = 'awaiting_channex_revision'
   }
   return reservation
 }
@@ -242,4 +248,142 @@ export function buildCalendarProjection(
 
 export function isPendingSync(reservation: Pick<ReservationRecord, 'status'>): boolean {
   return reservation.status === 'pending_sync'
+}
+
+/** Channex availability older than this is advisory only, never authoritative. */
+const ARI_FRESHNESS_MS = 60 * 60 * 1000
+
+/** Structural subsets so tests and callers can pass domain records directly. */
+export type CalendarAriInputs = {
+  availability: readonly {
+    propertyId: number
+    roomTypeId: number
+    date: string
+    availability: number
+    pulledAt: string
+  }[]
+  restrictions: readonly {
+    propertyId: number
+    ratePlanChannexId: string
+    date: string
+    rateMinor: number | null
+    minStayArrival: number | null
+    stopSell: boolean | null
+    closedToArrival: boolean | null
+    closedToDeparture: boolean | null
+  }[]
+  ratePlans: readonly {
+    propertyId: number
+    channexId: string
+    parentRatePlanChannexId: string | null
+    currency: string | null
+  }[]
+}
+
+export type CalendarDaySummary = {
+  propertyId: number
+  date: string
+  /** Active physical units (VR = 1). */
+  capacity: number
+  /** Overlapping non-cancelled stays (half-open; check-out day free). */
+  booked: number
+  pendingSync: number
+  vacancy: number
+  vacancySource: 'channex' | 'reservations'
+  /** True when vacancy is reservation-derived rather than reconciled Channex data. */
+  degraded: boolean
+  /** Representative nightly rate from a parent/manual plan; derived plans excluded. */
+  rateMinor: number | null
+  currency: string | null
+  minStay: number | null
+  stopSell: boolean
+  closedToArrival: boolean
+  closedToDeparture: boolean
+  hasRoomMapping: boolean
+  hasRateMapping: boolean
+}
+
+/**
+ * Per property/date overlay for the calendar: vacancy, representative rate,
+ * restriction markers, and freshness (R1-R4, AE1). Fresh Channex availability
+ * is authoritative; otherwise vacancy falls back to capacity minus stays and
+ * is labelled degraded.
+ */
+export function buildCalendarDaySummaries(
+  properties: readonly CalendarPropertyInput[],
+  rooms: readonly Pick<CalendarRoomInput, 'propertyId' | 'archivedAt'>[],
+  reservations: readonly ReservationRecord[],
+  ariInputs: CalendarAriInputs,
+  dates: readonly string[],
+  nowMs = Date.now(),
+): CalendarDaySummary[] {
+  const out: CalendarDaySummary[] = []
+  for (const property of properties) {
+    const activeRooms = rooms.filter(
+      (r) => r.propertyId === property.id && !r.archivedAt,
+    ).length
+    const hasRoomMapping = !property.isHotel || activeRooms > 0
+    const capacity = property.isHotel ? Math.max(1, activeRooms) : 1
+    const parentPlans = ariInputs.ratePlans.filter(
+      (p) => p.propertyId === property.id && p.parentRatePlanChannexId == null,
+    )
+    const stays = reservations.filter(
+      (r) =>
+        r.propertyId === property.id &&
+        r.status !== 'cancelled' &&
+        r.status !== 'no_show',
+    )
+
+    for (const date of dates) {
+      const overlapping = stays.filter(
+        (r) => r.checkInDate <= date && r.checkOutDate > date,
+      )
+      const booked = overlapping.length
+      const pendingSync = overlapping.filter(isPendingSync).length
+
+      const availRows = ariInputs.availability.filter(
+        (a) => a.propertyId === property.id && a.date === date,
+      )
+      const fresh =
+        availRows.length > 0 &&
+        availRows.every((a) => nowMs - Date.parse(a.pulledAt) <= ARI_FRESHNESS_MS)
+      const vacancy = fresh
+        ? availRows.reduce((sum, a) => sum + a.availability, 0)
+        : Math.max(0, capacity - booked)
+
+      const rep = parentPlans
+        .map((plan) =>
+          ariInputs.restrictions.find(
+            (r) =>
+              r.propertyId === property.id &&
+              r.ratePlanChannexId === plan.channexId &&
+              r.date === date,
+          ),
+        )
+        .find((r) => r != null)
+      const repPlan = rep
+        ? parentPlans.find((p) => p.channexId === rep.ratePlanChannexId)
+        : null
+
+      out.push({
+        propertyId: property.id,
+        date,
+        capacity,
+        booked,
+        pendingSync,
+        vacancy,
+        vacancySource: fresh ? 'channex' : 'reservations',
+        degraded: !fresh,
+        rateMinor: rep?.rateMinor ?? null,
+        currency: repPlan?.currency ?? null,
+        minStay: rep?.minStayArrival ?? null,
+        stopSell: rep?.stopSell ?? false,
+        closedToArrival: rep?.closedToArrival ?? false,
+        closedToDeparture: rep?.closedToDeparture ?? false,
+        hasRoomMapping,
+        hasRateMapping: parentPlans.length > 0,
+      })
+    }
+  }
+  return out
 }

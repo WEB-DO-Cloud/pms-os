@@ -10,8 +10,12 @@
 import { writeFileSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { createChannexClient } from './channex/client'
+import { runAriPull } from './jobs/pull-ari'
+import { detectAriDrift } from './jobs/detect-ari-drift'
 import { runBookingRevisionPull } from './jobs/pull-booking-revisions'
 import { processAckOutbox } from './jobs/process-ack-outbox'
+import { processAriWriteOutbox } from './jobs/process-ari-write-outbox'
+import { processBookingCrsOutbox } from './jobs/process-booking-crs-outbox'
 import { resolveSecret } from './secrets'
 import { createMemorySyncStore, type SyncStore } from './store'
 
@@ -27,6 +31,9 @@ export type WorkerCycleResult = {
   networkId: number
   pull: unknown
   ack: unknown
+  ari?: unknown
+  ariWrite?: unknown
+  ariDrift?: unknown
 }
 
 export function parseNetworkIds(raw: string | undefined): number[] {
@@ -75,7 +82,24 @@ export async function runHttpWorkerCycle(opts: {
       throw new Error(`ack network ${networkId}: HTTP ${ackRes.status}`)
     }
     const ack = await ackRes.json()
-    out.push({ networkId, pull, ack })
+    // Optional ARI write drain — older web builds may lack the route.
+    let ariWrite: unknown
+    try {
+      const ariWriteRes = await fetch(`${base}/api/internal/sync/ari-write`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ networkId }),
+      })
+      ariWrite = ariWriteRes.ok
+        ? await ariWriteRes.json()
+        : { skipped: true, status: ariWriteRes.status }
+    } catch (err) {
+      ariWrite = {
+        skipped: true,
+        reason: err instanceof Error ? err.message : 'error',
+      }
+    }
+    out.push({ networkId, pull, ack, ariWrite })
   }
   return out
 }
@@ -97,7 +121,37 @@ export async function runLocalWorkerCycle(opts: {
     const client = createChannexClient({ apiKey: resolveSecret(secretRow) })
     const pull = await runBookingRevisionPull(store, client, networkId, holder)
     const ack = await processAckOutbox(store, client, networkId)
-    out.push({ networkId, pull, ack })
+    // Local mode has no PG write-through; the projection lives in this process.
+    let ari: unknown
+    try {
+      ari = await runAriPull(store, client, networkId, holder)
+    } catch (err) {
+      ari = { skipped: true, reason: err instanceof Error ? err.message : 'error' }
+    }
+    let ariWrite: unknown
+    try {
+      const lanes = await processAriWriteOutbox(store, client, networkId)
+      const bookingCrs = await processBookingCrsOutbox(store, client, networkId)
+      ariWrite = { ...lanes, bookingCrs }
+    } catch (err) {
+      ariWrite = {
+        skipped: true,
+        reason: err instanceof Error ? err.message : 'error',
+      }
+    }
+    // Optional detect-only drift sample (SYNC_ARI_DRIFT_DETECT=1). Never writes.
+    let ariDrift: unknown
+    if (process.env.SYNC_ARI_DRIFT_DETECT === '1') {
+      try {
+        ariDrift = await detectAriDrift(store, client, networkId, holder)
+      } catch (err) {
+        ariDrift = {
+          skipped: true,
+          reason: err instanceof Error ? err.message : 'error',
+        }
+      }
+    }
+    out.push({ networkId, pull, ack, ari, ariWrite, ariDrift })
   }
   return out
 }

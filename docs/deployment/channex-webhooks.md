@@ -29,3 +29,26 @@ Exact header names and payload shape follow the Channex + PMS OS webhook handler
 ## Failure abort
 
 If migrate or worker health fails during launch: **do not** point Channex at this environment. Keep the previous webhook target or leave disabled until [launch-checklist.md](./launch-checklist.md) go criteria pass.
+
+## ARI write path notes
+
+Webhooks primarily drive booking-revision and message ingest. ARI writes are **pull/outbox** driven:
+
+- Worker drains `ari_write_intents` via internal `POST /api/internal/sync/ari-write` (or local cycle).
+- HTTP acceptance is not success until targeted GET / booking revision reconciles (see sync health `ariWrite.acceptedUnreconciledCount`).
+- Enabling write capabilities does **not** require a new webhook; keep webhooks on for revision confirmation of Booking CRS creates.
+
+### Nightly drift detect-only
+
+`detectAriDrift` (`@pms/sync`) compares projected availability/restrictions to a bounded Channex GET sample. It **never** POSTs corrections and skips dates covered by unresolved staff intents (`queued`/`sending`/`accepted`/`partial`/`retry`/`reconciling`).
+
+Run:
+
+```bash
+# Local worker cycle with optional detect (no auto-write):
+SYNC_ARI_DRIFT_DETECT=1 SYNC_WORKER_MODE=local SYNC_NETWORK_IDS=1 pnpm --filter @pms/sync exec … # or your worker entry
+
+# Or call detectAriDrift(store, client, networkId, holder) from an ops script / cron.
+```
+
+Treat reported drifts as operator signals: investigate, then human-approved replay of an existing desired-state intent if needed — never autonomous fix.

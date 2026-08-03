@@ -24,13 +24,10 @@ async function loadUnread() {
     return
   }
   try {
-    const res = await $fetch<{ messages: { status: string }[] }>('/api/inbox', {
+    const res = await $fetch<{ unreadCount: number }>('/api/inbox', {
       query: { networkId: currentNetworkId.value },
     })
-    // Outbound queue has no inbound "unread"; surface queued/failed as attention count.
-    unreadCount.value = res.messages.filter(
-      (m) => m.status === 'queued' || m.status === 'failed',
-    ).length
+    unreadCount.value = res.unreadCount
   } catch {
     unreadCount.value = 0
   }

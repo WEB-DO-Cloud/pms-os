@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest'
 import { buildPrincipal } from '@pms/auth'
 import {
   createMemoryStore,
+  offlineReservationCode,
   runCommand,
+  stayNightDates,
   type CommandContext,
 } from './index'
 
@@ -30,6 +32,30 @@ function ctx(
     propertyId: 10,
     ...partial,
   }
+}
+
+function enableBookingCrs(store: ReturnType<typeof createMemoryStore>) {
+  store.networkCapabilities.push({
+    networkId: 1,
+    bookingCrsWrite: true,
+    availabilityWrite: false,
+    rateRestrictionWrite: false,
+    derivedRateWrite: false,
+    aiApply: false,
+    updatedAt: new Date().toISOString(),
+  })
+}
+
+const crsInput = {
+  propertyId: 10,
+  checkInDate: '2026-08-01',
+  checkOutDate: '2026-08-03',
+  guestName: 'Direct Guest',
+  roomTypeId: 5,
+  roomTypeChannexId: 'rt-uuid',
+  ratePlanChannexId: 'rp-uuid',
+  days: { '2026-08-01': '100.00', '2026-08-02': '110.00' },
+  adults: 2,
 }
 
 function seedConfirmed(store: ReturnType<typeof createMemoryStore>) {
@@ -163,20 +189,48 @@ describe('reservation check-in / check-out', () => {
     expect(scoped.status).toBe('rejected')
     expect(scoped.error?.code).toBe('PROPERTY_SCOPE')
   })
+})
 
-  it('direct booking stays pending_sync until marked synced by write-back', async () => {
+describe('Booking CRS direct creation (U5)', () => {
+  it('AE2: capability off rejects before enqueue (no local reservation)', async () => {
     const store = createMemoryStore()
+    const user = principal()
+    const created = await runCommand(
+      'createDirectReservation',
+      ctx(user),
+      crsInput,
+      { store },
+    )
+    expect(created.status).toBe('rejected')
+    expect(created.error?.code).toBe('CAPABILITY_OFF')
+    expect(store.reservations).toHaveLength(0)
+    expect(store.ariWriteIntents).toHaveLength(0)
+  })
+
+  it('rejects missing CRS fields before enqueue', async () => {
+    const store = createMemoryStore()
+    enableBookingCrs(store)
+    const user = principal()
+    const missingDays = await runCommand(
+      'createDirectReservation',
+      ctx(user),
+      { ...crsInput, days: { '2026-08-01': '100.00' } },
+      { store },
+    )
+    expect(missingDays.status).toBe('rejected')
+    expect(missingDays.error?.code).toBe('VALIDATION')
+    expect(store.reservations).toHaveLength(0)
+  })
+
+  it('enqueues booking_crs intent and stays pending_sync with stable offline code', async () => {
+    const store = createMemoryStore()
+    enableBookingCrs(store)
     const user = principal()
 
     const created = await runCommand(
       'createDirectReservation',
       ctx(user),
-      {
-        propertyId: 10,
-        checkInDate: '2026-08-01',
-        checkOutDate: '2026-08-03',
-        guestName: 'Direct Guest',
-      },
+      crsInput,
       { store },
     )
     expect(created.status).toBe('ok')
@@ -184,7 +238,163 @@ describe('reservation check-in / check-out', () => {
       status: 'pending_sync',
       channel: 'direct',
       pendingSyncReason: 'direct_booking_awaiting_channex',
+      roomTypeId: 5,
     })
     expect(created.data?.status).not.toBe('confirmed')
+    const code = offlineReservationCode(1, created.data!.id)
+    expect(created.data?.otaReservationCode).toBe(code)
+    expect(store.ariWriteIntents).toHaveLength(1)
+    expect(store.ariWriteIntents[0]).toMatchObject({
+      lane: 'booking_crs',
+      status: 'queued',
+      idempotencyKey: `booking_crs:${code}`,
+    })
+    expect(stayNightDates('2026-08-01', '2026-08-03')).toEqual([
+      '2026-08-01',
+      '2026-08-02',
+    ])
+  })
+
+  it('stale baseSnapshotVersion rejects before enqueue', async () => {
+    const store = createMemoryStore()
+    enableBookingCrs(store)
+    store.ariAvailability.push({
+      networkId: 1,
+      propertyId: 10,
+      roomTypeId: 5,
+      date: '2026-08-01',
+      availability: 2,
+      snapshotVersion: 4,
+      pulledAt: new Date().toISOString(),
+    })
+    const created = await runCommand(
+      'createDirectReservation',
+      ctx(principal()),
+      { ...crsInput, baseSnapshotVersion: 3 },
+      { store },
+    )
+    expect(created.status).toBe('rejected')
+    expect(created.error?.code).toBe('STALE_SNAPSHOT')
+    expect(store.reservations).toHaveLength(0)
+    expect(store.ariWriteIntents).toHaveLength(0)
+  })
+
+  it('zero vacancy on a stay night rejects (AE5)', async () => {
+    const store = createMemoryStore()
+    enableBookingCrs(store)
+    store.ariAvailability.push({
+      networkId: 1,
+      propertyId: 10,
+      roomTypeId: 5,
+      date: '2026-08-01',
+      availability: 0,
+      snapshotVersion: 1,
+      pulledAt: new Date().toISOString(),
+    })
+    const created = await runCommand(
+      'createDirectReservation',
+      ctx(principal()),
+      { ...crsInput, baseSnapshotVersion: 1 },
+      { store },
+    )
+    expect(created.status).toBe('rejected')
+    expect(created.error?.code).toBe('CONFLICT')
+    expect(store.reservations).toHaveLength(0)
+    expect(store.ariWriteIntents).toHaveLength(0)
+  })
+
+  it('fresh snapshot + positive vacancy still enqueues', async () => {
+    const store = createMemoryStore()
+    enableBookingCrs(store)
+    const now = new Date().toISOString()
+    for (const date of ['2026-08-01', '2026-08-02']) {
+      store.ariAvailability.push({
+        networkId: 1,
+        propertyId: 10,
+        roomTypeId: 5,
+        date,
+        availability: 1,
+        snapshotVersion: 2,
+        pulledAt: now,
+      })
+    }
+    const created = await runCommand(
+      'createDirectReservation',
+      ctx(principal()),
+      { ...crsInput, baseSnapshotVersion: 2 },
+      { store },
+    )
+    expect(created.status).toBe('ok')
+    expect(store.ariWriteIntents[0]?.baseSnapshotVersion).toBe(2)
+  })
+
+  it('idempotent double-submit same key → one booking and one intent', async () => {
+    const store = createMemoryStore()
+    enableBookingCrs(store)
+    const user = principal()
+    const key = 'direct-idem-1'
+
+    const first = await runCommand(
+      'createDirectReservation',
+      ctx(user, { idempotencyKey: key }),
+      crsInput,
+      { store },
+    )
+    const second = await runCommand(
+      'createDirectReservation',
+      ctx(user, { idempotencyKey: key }),
+      { ...crsInput, guestName: 'Different' },
+      { store },
+    )
+    expect(first.status).toBe('ok')
+    expect(second.status).toBe('ok')
+    expect(second.idempotentReplay).toBe(true)
+    expect(store.reservations).toHaveLength(1)
+    expect(store.ariWriteIntents).toHaveLength(1)
+    expect(first.data?.otaReservationCode).toBe(second.data?.otaReservationCode)
+  })
+
+  it('AE3: revision match by ota code confirms pending Offline booking', async () => {
+    const store = createMemoryStore()
+    enableBookingCrs(store)
+    const user = principal()
+    const created = await runCommand(
+      'createDirectReservation',
+      ctx(user),
+      crsInput,
+      { store },
+    )
+    expect(created.status).toBe('ok')
+    const code = created.data!.otaReservationCode!
+
+    const syncPrincipal = principal({
+      userId: 'system:sync',
+      role: 'org_admin',
+      networkWide: true,
+    })
+    const applied = await runCommand(
+      'applyChannexBookingRevision',
+      ctx(syncPrincipal, { actorKind: 'sync', propertyId: 10 }),
+      {
+        propertyId: 10,
+        channexRevisionId: 'rev-offline-1',
+        channexBookingId: 'bk-chx-9',
+        revisionStatus: 'new',
+        checkInDate: '2026-08-01',
+        checkOutDate: '2026-08-03',
+        guestName: 'Direct Guest',
+        otaReservationCode: code,
+      },
+      { store },
+    )
+    expect(applied.status).toBe('ok')
+    expect(store.reservations).toHaveLength(1)
+    expect(store.reservations[0]).toMatchObject({
+      status: 'confirmed',
+      channexBookingId: 'bk-chx-9',
+      pendingSyncReason: null,
+      otaReservationCode: code,
+    })
+    expect(store.ariWriteIntents[0]?.status).toBe('reconciled')
   })
 })

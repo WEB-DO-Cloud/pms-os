@@ -54,10 +54,40 @@ describe('sync health public shape for integrations UI', () => {
         lastErrorMessage: 'guest email guest@example.com',
         updatedAt: '2026-07-16T10:05:00.000Z',
       },
-      { deadLetterCount: 1, pendingAckCount: 4 },
+      {
+        deadLetterCount: 1,
+        pendingAckCount: 4,
+        ariWrite: {
+          pendingOutboxCount: 1,
+          pendingOutboxByLane: { availability: 1 },
+          acceptedUnreconciledCount: 1,
+          partialCount: 0,
+          driftedCount: 0,
+          retryCount: 0,
+          warningIntentCount: 0,
+          oldestAcceptedAt: '2026-07-16T09:00:00.000Z',
+          oldestQueuedAt: null,
+          oldestPendingBookingRevisionAt: null,
+          acceptedAlertThresholdMs: 1_800_000,
+          stuckAcceptedAlerts: [
+            {
+              networkId: 1,
+              propertyId: 9,
+              intentId: 3,
+              lane: 'availability',
+              ageMs: 2_000_000,
+              roomTypeChannexId: 'rt-1',
+              dateFrom: '2026-08-01',
+              dateTo: '2026-08-01',
+            },
+          ],
+          properties: [],
+        },
+      },
     )
     expect(pub.deadLetterCount).toBe(1)
     expect(pub.pendingAckCount).toBe(4)
+    expect(pub.ariWrite?.acceptedUnreconciledCount).toBe(1)
     expect(pub.lastErrorCode).toBe('ACK_FAILED')
     expect(pub).not.toHaveProperty('lastErrorMessage')
     expect(JSON.stringify(pub)).not.toContain('guest@example.com')

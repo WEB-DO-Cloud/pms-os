@@ -104,3 +104,82 @@ Fail verification if any `ciphertext` looks like a plaintext Channex key (`chx_`
 curl -fsS "http://127.0.0.1:3000/api/health"
 docker compose exec worker cat "${WORKER_HEALTH_FILE:-/tmp/pms-worker-health.json}"
 ```
+
+## 8. ARI write outbox / drift / stuck accepted
+
+Outbox lag by status (expect drain of `queued`/`retry`; investigate long-lived `accepted`):
+
+```sql
+SELECT network_id, property_id, lane, status, COUNT(*) AS c,
+       MIN(created_at) AS oldest_created,
+       MIN(updated_at) AS oldest_updated
+FROM ari_write_intents
+WHERE status IN (
+  'queued', 'sending', 'accepted', 'partial', 'retry', 'reconciling', 'drifted', 'failed'
+)
+GROUP BY network_id, property_id, lane, status
+ORDER BY network_id, property_id, lane, status;
+```
+
+Stuck accepted (age > 30 minutes — matches `ACCEPTED_ALERT_AGE_MS`):
+
+```sql
+SELECT id, network_id, property_id, lane, status, updated_at,
+       resource_scope
+FROM ari_write_intents
+WHERE status IN ('accepted', 'reconciling')
+  AND updated_at < NOW() - INTERVAL '30 minutes'
+ORDER BY updated_at ASC
+LIMIT 50;
+```
+
+Drift and partial counts:
+
+```sql
+SELECT network_id, status, COUNT(*) AS c
+FROM ari_write_intents
+WHERE status IN ('drifted', 'partial', 'failed', 'retry')
+GROUP BY network_id, status;
+```
+
+Oldest open Booking CRS intent (no guest columns selected):
+
+```sql
+SELECT id, network_id, property_id, status, created_at, updated_at
+FROM ari_write_intents
+WHERE lane = 'booking_crs'
+  AND status IN ('queued', 'sending', 'accepted', 'partial', 'retry', 'reconciling')
+ORDER BY created_at ASC
+LIMIT 20;
+```
+
+Pending-sync reservations awaiting CRS revision (ids only — no guest PII):
+
+```sql
+SELECT id, network_id, property_id, status, pending_sync_reason, updated_at
+FROM reservations
+WHERE status = 'pending_sync'
+ORDER BY updated_at ASC
+LIMIT 50;
+```
+
+Capability kill switches (all write classes default false):
+
+```sql
+SELECT network_id,
+       booking_crs_write,
+       availability_write,
+       rate_restriction_write,
+       derived_rate_write,
+       ai_apply,
+       updated_at
+FROM network_capabilities
+ORDER BY network_id;
+```
+
+Health API cross-check (redacted — must not contain guest names or API keys):
+
+```bash
+curl -fsS "http://127.0.0.1:3000/api/sync/health?networkId=1" \
+  -H "Cookie: …" | jq '.ariWrite | {pendingOutboxCount, acceptedUnreconciledCount, driftedCount, stuckAcceptedAlerts}'
+```

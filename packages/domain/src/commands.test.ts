@@ -293,6 +293,15 @@ describe('domain commands', () => {
 
   it('createDirectReservation stays pending_sync and flags external sync recovery', async () => {
     const store = createMemoryStore()
+    store.networkCapabilities.push({
+      networkId: 1,
+      bookingCrsWrite: true,
+      availabilityWrite: false,
+      rateRestrictionWrite: false,
+      derivedRateWrite: false,
+      aiApply: false,
+      updatedAt: new Date().toISOString(),
+    })
     const user = principal({ role: 'front_desk', propertyIds: [10], networkWide: false })
 
     const result = await runCommand(
@@ -304,6 +313,10 @@ describe('domain commands', () => {
         checkOutDate: '2026-08-03',
         guestName: 'Grace',
         adults: 2,
+        roomTypeId: 5,
+        roomTypeChannexId: 'rt-uuid',
+        ratePlanChannexId: 'rp-uuid',
+        days: { '2026-08-01': '100.00', '2026-08-02': '100.00' },
       },
       { store },
     )
@@ -316,6 +329,30 @@ describe('domain commands', () => {
       networkId: 1,
     })
     expect(result.meta?.needsExternalSyncRecovery).toBe(true)
+    expect(store.ariWriteIntents).toHaveLength(1)
+    expect(store.ariWriteIntents[0]?.lane).toBe('booking_crs')
+  })
+
+  it('createDirectReservation fails closed when bookingCrsWrite is off', async () => {
+    const store = createMemoryStore()
+    const user = principal({ role: 'front_desk', propertyIds: [10], networkWide: false })
+    const result = await runCommand(
+      'createDirectReservation',
+      ctx(user, { networkId: 1, propertyId: 10 }),
+      {
+        propertyId: 10,
+        checkInDate: '2026-08-01',
+        checkOutDate: '2026-08-03',
+        guestName: 'Grace',
+        roomTypeId: 5,
+        roomTypeChannexId: 'rt-uuid',
+        ratePlanChannexId: 'rp-uuid',
+        days: { '2026-08-01': '100.00', '2026-08-02': '100.00' },
+      },
+      { store },
+    )
+    expect(result.status).toBe('rejected')
+    expect(result.error?.code).toBe('CAPABILITY_OFF')
   })
 
   it('applyChannexBookingRevision claims revision + ack outbox without Channex HTTP', async () => {
@@ -476,5 +513,136 @@ describe('command risk metadata', () => {
       requiresApproval: false,
       supportsDryRun: true,
     })
+  })
+})
+
+describe('calendar day actions (U4)', () => {
+  it('creates a task with a property-local due date from the calendar cell', async () => {
+    const store = createMemoryStore()
+    const desk = principal({ role: 'front_desk', networkWide: false, propertyIds: [10] })
+    const result = await runCommand(
+      'createTask',
+      ctx(desk),
+      {
+        title: 'Deep clean',
+        propertyId: 10,
+        category: 'cleaning',
+        dueDate: '2026-08-05',
+      },
+      { store },
+    )
+    expect(result.status).toBe('ok')
+    expect(store.tasks[0]).toMatchObject({ dueDate: '2026-08-05' })
+  })
+
+  it('rejects malformed due dates', async () => {
+    const store = createMemoryStore()
+    const result = await runCommand(
+      'createTask',
+      ctx(principal()),
+      { title: 'Bad date', propertyId: 10, dueDate: 'tomorrow' },
+      { store },
+    )
+    expect(result.status).toBe('rejected')
+    expect(result.error?.code).toBe('VALIDATION')
+    expect(store.tasks).toHaveLength(0)
+  })
+
+  it('creates, edits, and deletes a property/date note without touching tasks', async () => {
+    const store = createMemoryStore()
+    const desk = principal({ role: 'front_desk', networkWide: false, propertyIds: [10] })
+
+    const created = await runCommand(
+      'createCalendarNote',
+      ctx(desk),
+      { propertyId: 10, date: '2026-08-05', body: 'Pool maintenance day' },
+      { store },
+    )
+    expect(created.status).toBe('ok')
+    const note = created.data as { id: number }
+    expect(store.calendarNotes[0]).toMatchObject({
+      propertyId: 10,
+      date: '2026-08-05',
+      body: 'Pool maintenance day',
+      createdByUserId: desk.userId,
+    })
+    expect(store.tasks).toHaveLength(0)
+
+    const updated = await runCommand(
+      'updateCalendarNote',
+      ctx(desk),
+      { noteId: note.id, propertyId: 10, body: 'Pool closed until 2pm' },
+      { store },
+    )
+    expect(updated.status).toBe('ok')
+    expect(store.calendarNotes[0]?.body).toBe('Pool closed until 2pm')
+
+    const deleted = await runCommand(
+      'deleteCalendarNote',
+      ctx(desk),
+      { noteId: note.id, propertyId: 10 },
+      { store },
+    )
+    expect(deleted.status).toBe('ok')
+    expect(store.calendarNotes).toHaveLength(0)
+  })
+
+  it('scopes notes per property and date without collisions', async () => {
+    const store = createMemoryStore()
+    const mgr = principal()
+    await runCommand(
+      'createCalendarNote',
+      ctx(mgr),
+      { propertyId: 10, date: '2026-08-05', body: 'A' },
+      { store },
+    )
+    await runCommand(
+      'createCalendarNote',
+      ctx(mgr, { propertyId: 11 }),
+      { propertyId: 11, date: '2026-08-05', body: 'B' },
+      { store },
+    )
+    await runCommand(
+      'createCalendarNote',
+      ctx(mgr),
+      { propertyId: 10, date: '2026-08-06', body: 'C' },
+      { store },
+    )
+    expect(store.calendarNotes).toHaveLength(3)
+    expect(new Set(store.calendarNotes.map((n) => n.id)).size).toBe(3)
+  })
+
+  it('denies out-of-scope property note mutations', async () => {
+    const store = createMemoryStore()
+    const desk = principal({ role: 'front_desk', networkWide: false, propertyIds: [10] })
+    const result = await runCommand(
+      'createCalendarNote',
+      ctx(desk, { propertyId: 99 }),
+      { propertyId: 99, date: '2026-08-05', body: 'Nope' },
+      { store },
+    )
+    expect(result.status).toBe('rejected')
+    expect(result.error?.code).toBe('PROPERTY_SCOPE')
+    expect(store.calendarNotes).toHaveLength(0)
+  })
+
+  it('rejects editing a note that belongs to another property', async () => {
+    const store = createMemoryStore()
+    const mgr = principal()
+    const created = await runCommand(
+      'createCalendarNote',
+      ctx(mgr),
+      { propertyId: 10, date: '2026-08-05', body: 'A' },
+      { store },
+    )
+    const note = created.data as { id: number }
+    const result = await runCommand(
+      'updateCalendarNote',
+      ctx(mgr, { propertyId: 11 }),
+      { noteId: note.id, propertyId: 11, body: 'Hijack' },
+      { store },
+    )
+    expect(result.status).toBe('rejected')
+    expect(result.error?.code).toBe('NOT_FOUND')
   })
 })
