@@ -58,6 +58,9 @@ services:
       STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
       STRIPE_PRICE_HOTEL: ${STRIPE_PRICE_HOTEL:-}
       STRIPE_PRICE_PROPERTY: ${STRIPE_PRICE_PROPERTY:-}
+      QUOTE_TOKEN_SECRET: ${QUOTE_TOKEN_SECRET:?set QUOTE_TOKEN_SECRET in .env}
+      STRIPE_CONNECT_WEBHOOK_SECRET: ${STRIPE_CONNECT_WEBHOOK_SECRET:-}
+      PUBLIC_BOOKING_ORIGIN: ${PUBLIC_BOOKING_ORIGIN:-https://book.pms.do}
       HOST: "0.0.0.0"
       PORT: "3000"
       NODE_ENV: production
@@ -94,6 +97,32 @@ services:
     ports:
       # Loopback only; point your reverse proxy at this port for the website.
       - "127.0.0.1:33101:3000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  booking:
+    build:
+      context: .
+      target: booking
+    restart: unless-stopped
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "3000"
+      NODE_ENV: production
+      NUXT_PUBLIC_PMS_API_BASE: ${NUXT_PUBLIC_PMS_API_BASE:-https://app.pms.do}
+    ports:
+      # Loopback only; point Caddy at this port for book.pms.do.
+      - "127.0.0.1:33102:3000"
     healthcheck:
       test:
         [

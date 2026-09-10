@@ -225,7 +225,12 @@ export {
   splitGuestName,
   stayNightDates,
   assertRoomTypeVacancy,
+  buildBookingCrsPayload,
+  pendingPublicCrsFromRaw,
+  attachPendingPublicCrs,
   type CreateDirectReservationInput,
+  type PendingPublicCrs,
+  type BookingCrsPayload,
 } from './commands/create-direct-reservation'
 export {
   availabilityIdempotencyKey,
@@ -256,6 +261,37 @@ export type {
   RatePlanView,
   RatesReadModel,
 } from './rates'
+export {
+  quoteStay,
+  isParentOrManualRatePlan,
+  ARI_FRESHNESS_MS,
+  PUBLIC_QUOTE_HORIZON_DAYS,
+} from './rates/stay-quote'
+export type { StayQuoteOk, StayQuoteErr, StayQuoteNight } from './rates/stay-quote'
+export {
+  COLLECTION_TYPES,
+  assertLivePolicyShape,
+  collectNowNeedsCharges,
+  computeDepositMinor,
+  isCollectNow,
+  isCollectionType,
+  snapshotPaymentTerms,
+  mintQuoteToken,
+  verifyQuoteToken,
+  QUOTE_TOKEN_TTL_MS,
+  publicVacancyForNight,
+  reservationOccupiesInventory,
+  resolvePublicBookingReadiness,
+  parentOrManualPlansForProperty,
+  buildPublicBookingPrincipal,
+} from './public-booking'
+export type {
+  CollectionType,
+  LiveCollectionPolicy,
+  PaymentTermsSnapshot,
+  QuoteTokenPayload,
+  PublicBookingReadiness,
+} from './public-booking'
 export type {
   AssignableRoom,
   AssignableStay,

@@ -1,0 +1,21 @@
+{
+  "name": "@pms/booking",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node ./scripts/verify-isolation.mjs && nuxt build",
+    "dev": "nuxt dev --port 3003",
+    "generate": "nuxt generate",
+    "typecheck": "nuxt typecheck",
+    "test": "node ./scripts/verify-isolation.mjs",
+    "postinstall": "nuxt prepare"
+  },
+  "dependencies": {
+    "nuxt": "^4.0.0",
+    "vue": "^3.5.17"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.3",
+    "vue-tsc": "^2.2.10"
+  }
+}

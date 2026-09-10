@@ -83,6 +83,8 @@ export async function ensureSecretsHydrated(networkId: number): Promise<SyncStor
     try {
       const { hydrateAriState } = await import('../lib/ari-persistence')
       await hydrateAriState(getDb(), store.domain, networkId)
+      const { hydrateReservations } = await import('../lib/reservation-persistence')
+      await hydrateReservations(getDb(), store.domain, networkId)
     } catch {
       // Missing migration / unit tests without PG — memory-only still works.
     }
@@ -314,8 +316,28 @@ export async function runInternalAck(networkId: number) {
 export async function runInternalAriWrite(networkId: number) {
   const store = await ensureSecretsHydrated(networkId)
   const client = getChannexClientForNetwork(store, networkId)
+  const { expirePendingPublicHolds } = await import('../lib/expire-public-holds')
+  expirePendingPublicHolds(store.domain)
+  const { reconcileCheckoutSession } = await import('./property-stripe')
+  for (const row of store.domain.reservations) {
+    if (
+      row.status === 'pending_payment' &&
+      row.stripeCheckoutSessionId &&
+      row.checkoutExpiresAt &&
+      Date.parse(row.checkoutExpiresAt) <= Date.now()
+    ) {
+      await reconcileCheckoutSession(row)
+    }
+  }
   const result = await processAriWriteOutbox(store, client, networkId)
-  const bookingCrs = await processBookingCrsOutbox(store, client, networkId)
+  const bookingCrs = await processBookingCrsOutbox(store, client, networkId, {
+    async onHardFail(reservationId) {
+      const row = store.domain.reservations.find((r) => r.id === reservationId)
+      if (!row?.stripeCheckoutSessionId) return
+      const { refundPaidPublicReservation } = await import('./property-stripe')
+      await refundPaidPublicReservation(row)
+    },
+  })
   // ponytail: best-effort PG status write-through; memory is authoritative in-process.
   if (
     process.env.DATABASE_URL &&

@@ -30,6 +30,10 @@ describe('db schema invariants', () => {
     expect(uniqueNames(properties)).toContain('properties_network_channex_uidx')
     expect(uniqueNames(roomTypes)).toContain('room_types_network_channex_uidx')
     expect(uniqueNames(reservations)).toContain('reservations_network_channex_booking_uidx')
+    expect(uniqueNames(reservations)).toContain('reservations_quote_token_hash_uidx')
+    expect(uniqueNames(reservations)).toContain(
+      'reservations_network_public_idempotency_uidx',
+    )
     expect(uniqueNames(bookingRevisions)).toContain('booking_revisions_network_revision_uidx')
   })
 

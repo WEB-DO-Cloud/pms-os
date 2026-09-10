@@ -111,6 +111,14 @@ export type ReservationRecord = {
   paymentCollect?: string | null
   paymentType?: string | null
   totalAmountMinor?: number | null
+  paymentTermsSnapshot?: import('./public-booking/policy').PaymentTermsSnapshot | null
+  confirmationToken?: string | null
+  quoteTokenHash?: string | null
+  publicIdempotencyKey?: string | null
+  stripeCheckoutSessionId?: string | null
+  stripeConnectedAccountId?: string | null
+  stripeAmountTotal?: number | null
+  checkoutExpiresAt?: string | null
   /** PMS-owned front-desk state; never overwrite Channex `status`. */
   operationalStatus?: string | null
   checkedInAt?: string | null
@@ -304,7 +312,7 @@ export const CAPABILITY_KEYS = [
 
 export type CapabilityKey = (typeof CAPABILITY_KEYS)[number]
 
-/** Per-network operational write gates (KTD7) — every class defaults off. */
+/** Personal-network operational write gates (KTD7) — every class defaults off. */
 export type NetworkCapabilityRecord = {
   networkId: number
   bookingCrsWrite: boolean
@@ -375,6 +383,9 @@ export type DomainStore = {
   automationRuns: AutomationRunRecord[]
   auditEvents: import('./audit').AuditEventRecord[]
   idempotency: IdempotencyRecord[]
+  bookingPolicies: import('./public-booking/policy').LiveCollectionPolicy[]
+  usedQuoteTokenHashes: string[]
+  processedStripeEventIds: string[]
   nextId: (bucket: string) => number
 }
 
@@ -403,6 +414,9 @@ export function createMemoryStore(): DomainStore {
     automationRuns: [],
     auditEvents: [],
     idempotency: [],
+    bookingPolicies: [],
+    usedQuoteTokenHashes: [],
+    processedStripeEventIds: [],
     nextId(bucket) {
       const n = (counters.get(bucket) ?? 0) + 1
       counters.set(bucket, n)

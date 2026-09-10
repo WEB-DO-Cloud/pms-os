@@ -1,4 +1,6 @@
 import { assertCapability, assertFreshSnapshot, enqueueAriIntent } from '../ari'
+import { ARI_FRESHNESS_MS, publicVacancyForNight } from '../public-booking/vacancy'
+import type { PaymentTermsSnapshot } from '../public-booking/policy'
 import type { CommandDefinition, DomainStore, ReservationRecord } from '../store'
 
 export type CreateDirectReservationInput = {
@@ -6,6 +8,7 @@ export type CreateDirectReservationInput = {
   checkInDate: string
   checkOutDate: string
   guestName: string
+  guestEmail?: string | null
   adults?: number
   children?: number
   infants?: number
@@ -23,6 +26,18 @@ export type CreateDirectReservationInput = {
    * (required for user/calendar path).
    */
   baseSnapshotVersion?: number
+  paymentCollect?: string | null
+  totalAmountMinor?: number | null
+  paymentTermsSnapshot?: PaymentTermsSnapshot | null
+  confirmationToken?: string | null
+  quoteTokenHash?: string | null
+  publicIdempotencyKey?: string | null
+  /** Collect-now hold. Defaults to pending_sync + CRS enqueue. */
+  reservationStatus?: 'pending_sync' | 'pending_payment'
+  enqueueCrs?: boolean
+  requireEmail?: boolean
+  failClosedMissingAri?: boolean
+  occupancyCap?: number
 }
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
@@ -34,6 +49,112 @@ export function offlineReservationCode(
   reservationId: number,
 ): string {
   return `PMS-${networkId}-${reservationId}`
+}
+
+/** Local join keys stored on the reservation until paid CRS enqueue. */
+export type PendingPublicCrs = {
+  roomTypeChannexId: string
+  ratePlanChannexId: string
+  days: Record<string, string>
+}
+
+export type BookingCrsPayload = {
+  property_id: string | null
+  ota_reservation_code: string
+  ota_name: 'Offline'
+  arrival_date: string
+  departure_date: string
+  currency: string
+  customer: { name: string; surname: string; mail?: string }
+  rooms: Array<{
+    room_type_id: string
+    rate_plan_id: string
+    days: Record<string, string>
+    guests: Array<{ name: string; surname: string }>
+    occupancy: { adults: number; children: number; infants: number }
+  }>
+  _local: { reservationId: number; roomTypeId: number }
+}
+
+export function pendingPublicCrsFromRaw(raw: unknown): PendingPublicCrs | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const pending = (raw as { pendingPublicCrs?: unknown }).pendingPublicCrs
+  if (!pending || typeof pending !== 'object' || Array.isArray(pending)) return null
+  const p = pending as Partial<PendingPublicCrs>
+  if (
+    !p.roomTypeChannexId?.trim() ||
+    !p.ratePlanChannexId?.trim() ||
+    !p.days ||
+    typeof p.days !== 'object'
+  ) {
+    return null
+  }
+  return {
+    roomTypeChannexId: p.roomTypeChannexId,
+    ratePlanChannexId: p.ratePlanChannexId,
+    days: p.days,
+  }
+}
+
+export function attachPendingPublicCrs(
+  raw: unknown,
+  pending: PendingPublicCrs,
+): Record<string, unknown> {
+  const base =
+    raw && typeof raw === 'object' && !Array.isArray(raw)
+      ? { ...(raw as Record<string, unknown>) }
+      : {}
+  return { ...base, pendingPublicCrs: pending }
+}
+
+export function buildBookingCrsPayload(input: {
+  networkId: number
+  reservationId: number
+  roomTypeId: number
+  checkInDate: string
+  checkOutDate: string
+  currency: string
+  guestName: string
+  guestEmail?: string | null
+  adults: number
+  children: number
+  infants: number
+  roomTypeChannexId: string
+  ratePlanChannexId: string
+  days: Record<string, string>
+}): BookingCrsPayload {
+  const guest = splitGuestName(input.guestName)
+  const code = offlineReservationCode(input.networkId, input.reservationId)
+  return {
+    property_id: null,
+    ota_reservation_code: code,
+    ota_name: 'Offline',
+    arrival_date: input.checkInDate,
+    departure_date: input.checkOutDate,
+    currency: input.currency,
+    customer: {
+      name: guest.name,
+      surname: guest.surname,
+      ...(input.guestEmail?.trim() ? { mail: input.guestEmail.trim() } : {}),
+    },
+    rooms: [
+      {
+        room_type_id: input.roomTypeChannexId,
+        rate_plan_id: input.ratePlanChannexId,
+        days: input.days,
+        guests: [{ name: guest.name, surname: guest.surname }],
+        occupancy: {
+          adults: input.adults,
+          children: input.children,
+          infants: input.infants,
+        },
+      },
+    ],
+    _local: {
+      reservationId: input.reservationId,
+      roomTypeId: input.roomTypeId,
+    },
+  }
 }
 
 export function splitGuestName(full: string): { name: string; surname: string } {
@@ -60,13 +181,33 @@ export function stayNightDates(checkIn: string, checkOut: string): string[] {
  * on any stay night (competing booking / closed inventory).
  */
 export function assertRoomTypeVacancy(
-  store: Pick<DomainStore, 'ariAvailability'>,
+  store: Pick<DomainStore, 'ariAvailability' | 'reservations'>,
   networkId: number,
   propertyId: number,
   roomTypeId: number,
   nights: readonly string[],
+  options: { failClosedMissingAri?: boolean; nowMs?: number; freshnessMs?: number } = {},
 ): void {
+  const nowMs = options.nowMs ?? Date.now()
+  const freshnessMs = options.freshnessMs ?? ARI_FRESHNESS_MS
   for (const night of nights) {
+    if (options.failClosedMissingAri) {
+      const vacancy = publicVacancyForNight(store, {
+        networkId,
+        propertyId,
+        roomTypeId,
+        night,
+        nowMs,
+        freshnessMs,
+      })
+      if (!vacancy.ok || vacancy.remaining < 1) {
+        throw {
+          code: 'CONFLICT',
+          message: `No vacancy for room type on ${night}`,
+        }
+      }
+      continue
+    }
     const rows = store.ariAvailability.filter(
       (a) =>
         a.networkId === networkId &&
@@ -75,8 +216,15 @@ export function assertRoomTypeVacancy(
         a.date === night,
     )
     if (rows.length === 0) continue
-    const sum = rows.reduce((s, r) => s + r.availability, 0)
-    if (sum === 0 || rows.some((r) => r.availability === 0)) {
+    const vacancy = publicVacancyForNight(store, {
+      networkId,
+      propertyId,
+      roomTypeId,
+      night,
+      nowMs,
+      freshnessMs: Number.MAX_SAFE_INTEGER,
+    })
+    if (!vacancy.ok || vacancy.remaining < 1) {
       throw {
         code: 'CONFLICT',
         message: `No vacancy for room type on ${night}`,
@@ -107,6 +255,16 @@ function assertCrsFields(input: CreateDirectReservationInput): void {
   const adults = input.adults ?? 1
   if (!Number.isFinite(adults) || adults < 1) {
     throw { code: 'VALIDATION', message: 'adults must be at least 1' }
+  }
+  if (input.requireEmail && !input.guestEmail?.trim()) {
+    throw { code: 'VALIDATION', message: 'guestEmail is required' }
+  }
+  if (
+    input.occupancyCap != null &&
+    Number.isFinite(input.occupancyCap) &&
+    adults > input.occupancyCap
+  ) {
+    throw { code: 'VALIDATION', message: 'adults exceed room capacity' }
   }
   const nights = stayNightDates(input.checkInDate, input.checkOutDate)
   if (nights.length === 0) {
@@ -160,6 +318,7 @@ export const createDirectReservation: CommandDefinition<
       input.propertyId,
       input.roomTypeId,
       nights,
+      { failClosedMissingAri: input.failClosedMissingAri === true },
     )
     const days: Record<string, string> = {}
     for (const night of nights) days[night] = String(input.days[night])
@@ -169,22 +328,29 @@ export const createDirectReservation: CommandDefinition<
       networkId: ctx.networkId,
       propertyId: input.propertyId,
       roomTypeId: input.roomTypeId,
-      status: 'pending_sync',
+      status: input.reservationStatus ?? 'pending_sync',
       checkInDate: input.checkInDate,
       checkOutDate: input.checkOutDate,
       currency: input.currency ?? 'USD',
       staffNotes: null,
       channexBookingId: null,
-      pendingSyncReason: 'direct_booking_awaiting_channex',
+      pendingSyncReason:
+        input.reservationStatus === 'pending_payment'
+          ? 'public_booking_awaiting_payment'
+          : 'direct_booking_awaiting_channex',
       guestName: input.guestName.trim(),
-      guestEmail: null,
+      guestEmail: input.guestEmail?.trim() || null,
       adults,
       children,
       infants,
       channel: 'direct',
-      paymentCollect: null,
+      paymentCollect: input.paymentCollect ?? null,
       paymentType: null,
-      totalAmountMinor: null,
+      totalAmountMinor: input.totalAmountMinor ?? null,
+      paymentTermsSnapshot: input.paymentTermsSnapshot ?? null,
+      confirmationToken: input.confirmationToken ?? null,
+      quoteTokenHash: input.quoteTokenHash ?? null,
+      publicIdempotencyKey: input.publicIdempotencyKey ?? null,
       operationalStatus: null,
       checkedInAt: null,
       checkedOutAt: null,
@@ -193,49 +359,48 @@ export const createDirectReservation: CommandDefinition<
 
     const code = offlineReservationCode(ctx.networkId, reservation.id)
     reservation.otaReservationCode = code
+    reservation.channexRaw = attachPendingPublicCrs(reservation.channexRaw, {
+      roomTypeChannexId: input.roomTypeChannexId,
+      ratePlanChannexId: input.ratePlanChannexId,
+      days,
+    })
     store.reservations.push(reservation)
 
-    // Absolute Booking CRS payload; worker/write-back sends this once.
-    const bookingPayload = {
-      property_id: null as string | null, // filled at send with mapped Channex property id
-      ota_reservation_code: code,
-      ota_name: 'Offline' as const,
-      arrival_date: input.checkInDate,
-      departure_date: input.checkOutDate,
-      currency: reservation.currency,
-      customer: { name: guest.name, surname: guest.surname },
-      rooms: [
-        {
-          room_type_id: input.roomTypeChannexId,
-          rate_plan_id: input.ratePlanChannexId,
-          days,
-          guests: [{ name: guest.name, surname: guest.surname }],
-          occupancy: { adults, children, infants },
-        },
-      ],
-      // Local join keys for write-back / resume (not sent to Channex).
-      _local: {
-        reservationId: reservation.id,
-        roomTypeId: input.roomTypeId,
-      },
-    }
-
-    enqueueAriIntent(store, {
+    const bookingPayload = buildBookingCrsPayload({
       networkId: ctx.networkId,
-      propertyId: input.propertyId,
-      lane: 'booking_crs',
-      idempotencyKey: `booking_crs:${code}`,
-      payload: bookingPayload,
-      resourceScope: {
-        roomTypeChannexId: input.roomTypeChannexId,
-        ratePlanChannexId: input.ratePlanChannexId,
-        dateFrom: input.checkInDate,
-        dateTo: input.checkOutDate,
-      },
-      baseSnapshotVersion:
-        input.baseSnapshotVersion !== undefined ? input.baseSnapshotVersion : null,
-      actorPrincipalId: ctx.principal.userId ?? null,
+      reservationId: reservation.id,
+      roomTypeId: input.roomTypeId,
+      checkInDate: input.checkInDate,
+      checkOutDate: input.checkOutDate,
+      currency: reservation.currency,
+      guestName: input.guestName,
+      guestEmail: input.guestEmail,
+      adults,
+      children,
+      infants,
+      roomTypeChannexId: input.roomTypeChannexId,
+      ratePlanChannexId: input.ratePlanChannexId,
+      days,
     })
+
+    if (input.enqueueCrs !== false) {
+      enqueueAriIntent(store, {
+        networkId: ctx.networkId,
+        propertyId: input.propertyId,
+        lane: 'booking_crs',
+        idempotencyKey: `booking_crs:${code}`,
+        payload: bookingPayload,
+        resourceScope: {
+          roomTypeChannexId: input.roomTypeChannexId,
+          ratePlanChannexId: input.ratePlanChannexId,
+          dateFrom: input.checkInDate,
+          dateTo: input.checkOutDate,
+        },
+        baseSnapshotVersion:
+          input.baseSnapshotVersion !== undefined ? input.baseSnapshotVersion : null,
+        actorPrincipalId: ctx.principal.userId ?? null,
+      })
+    }
 
     return {
       data: reservation,
