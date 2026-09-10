@@ -22,14 +22,17 @@ describe('deployment artifacts (U14)', () => {
     expect(compose).toMatch(/service_completed_successfully/)
     expect(compose).toMatch(/^\s+web:/m)
     expect(compose).toMatch(/^\s+website:/m)
+    expect(compose).toMatch(/^\s+booking:/m)
     expect(compose).toMatch(/^\s+worker:/m)
     expect(compose).toMatch(/^\s+postgres:/m)
     expect(compose).toContain('PMS_EDITION')
     expect(compose).toContain('SUPER_ADMIN_EMAILS')
     expect(compose).toContain('127.0.0.1:33101:3000')
+    expect(compose).toContain('127.0.0.1:33102:3000')
 
     expect(dockerfile).toMatch(/AS web/)
     expect(dockerfile).toMatch(/AS website/)
+    expect(dockerfile).toMatch(/AS booking/)
     expect(dockerfile).toMatch(/AS worker/)
     expect(dockerfile).toMatch(/AS migrate/)
 
