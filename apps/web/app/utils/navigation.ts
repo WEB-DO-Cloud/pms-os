@@ -44,6 +44,11 @@ const SETTINGS_ITEMS: readonly SidebarItem[] = [
     action: 'integrations',
   },
   {
+    label: 'Public booking',
+    to: '/settings/booking',
+    module: 'settings',
+  },
+  {
     label: 'Billing & Subscription',
     to: '/settings/billing',
     module: 'settings',

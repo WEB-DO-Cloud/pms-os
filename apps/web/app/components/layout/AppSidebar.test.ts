@@ -52,6 +52,7 @@ describe('sidebar navigation', () => {
       'General',
       'Team & Permissions',
       'Integrations',
+      'Public booking',
       'Billing & Subscription',
       'Notifications',
       'Security',
