@@ -190,6 +190,9 @@ export async function processBookingCrsOutbox(
   store: SyncStore,
   client: ChannexClient,
   networkId: number,
+  hooks: {
+    onHardFail?: (reservationId: number) => Promise<void> | void
+  } = {},
 ): Promise<BookingCrsOutboxResult> {
   const result: BookingCrsOutboxResult = {
     processed: 0,
@@ -252,6 +255,13 @@ export async function processBookingCrsOutbox(
       result.retried++
     } else if (intent.status === 'failed') {
       result.failed++
+      const reservationId = (intent.payload as BookingCrsIntentPayload)._local?.reservationId
+      if (reservationId) {
+        const row = store.domain.reservations.find((r) => r.id === reservationId)
+        if (row?.stripeCheckoutSessionId) {
+          await hooks.onHardFail?.(reservationId)
+        }
+      }
     } else {
       result.skipped++
     }
