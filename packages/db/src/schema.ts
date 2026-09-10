@@ -18,12 +18,15 @@ export const propertyStatusEnum = pgEnum('property_status', [
 ])
 
 export const reservationStatusEnum = pgEnum('reservation_status', [
+  'pending_payment',
   'pending_sync',
   'pending',
   'confirmed',
   'checked_in',
   'checked_out',
   'cancelled',
+  'released',
+  'refunded',
   'no_show',
 ])
 
@@ -161,6 +164,13 @@ export const properties = pgTable(
     checkOutTime: text('check_out_time').default('11:00'),
     notes: text('notes'),
     archivedAt: timestamp('archived_at', { withTimezone: true }),
+    bookingCollectionType: text('booking_collection_type'),
+    bookingCollectionPercent: integer('booking_collection_percent'),
+    bookingCollectionFixedMinor: integer('booking_collection_fixed_minor'),
+    bookingTermsText: text('booking_terms_text'),
+    stripeConnectAccountId: text('stripe_connect_account_id'),
+    stripeChargesEnabled: boolean('stripe_charges_enabled').default(false).notNull(),
+    bookingPolicyUpdatedAt: timestamp('booking_policy_updated_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
@@ -301,10 +311,27 @@ export const reservations = pgTable(
     checkedInAt: timestamp('checked_in_at', { withTimezone: true }),
     checkedOutAt: timestamp('checked_out_at', { withTimezone: true }),
     pendingSyncReason: text('pending_sync_reason'),
+    paymentTermsSnapshot: jsonb('payment_terms_snapshot'),
+    confirmationToken: text('confirmation_token'),
+    quoteTokenHash: text('quote_token_hash'),
+    publicIdempotencyKey: text('public_idempotency_key'),
+    stripeCheckoutSessionId: text('stripe_checkout_session_id'),
+    stripeConnectedAccountId: text('stripe_connected_account_id'),
+    stripeAmountTotal: integer('stripe_amount_total'),
+    checkoutExpiresAt: timestamp('checkout_expires_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [
+    uniqueIndex('reservations_confirmation_token_uidx').on(t.confirmationToken),
+    uniqueIndex('reservations_quote_token_hash_uidx').on(t.quoteTokenHash),
+    uniqueIndex('reservations_network_public_idempotency_uidx').on(
+      t.networkId,
+      t.publicIdempotencyKey,
+    ),
+    uniqueIndex('reservations_stripe_checkout_session_uidx').on(
+      t.stripeCheckoutSessionId,
+    ),
     uniqueIndex('reservations_network_channex_booking_uidx').on(
       t.networkId,
       t.channexBookingId,
@@ -808,6 +835,15 @@ export const ariWriteIntents = pgTable(
   ],
 )
 
+export const processedStripeEvents = pgTable(
+  'processed_stripe_events',
+  {
+    eventId: text('event_id').primaryKey(),
+    kind: text('kind').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+)
+
 /** Field ownership matrix for Channex re-sync (KTD23). */
 export const fieldOwnership = {
   properties: {
@@ -822,7 +858,20 @@ export const fieldOwnership = {
       'timezone',
       'currency',
     ],
-    pmsOwned: ['checkInTime', 'checkOutTime', 'notes', 'status', 'archivedAt'],
+    pmsOwned: [
+      'checkInTime',
+      'checkOutTime',
+      'notes',
+      'status',
+      'archivedAt',
+      'bookingCollectionType',
+      'bookingCollectionPercent',
+      'bookingCollectionFixedMinor',
+      'bookingTermsText',
+      'stripeConnectAccountId',
+      'stripeChargesEnabled',
+      'bookingPolicyUpdatedAt',
+    ],
   },
   reservations: {
     channexOwned: [
@@ -854,6 +903,14 @@ export const fieldOwnership = {
       'checkedOutAt',
       'pendingSyncReason',
       'roomId',
+      'paymentTermsSnapshot',
+      'confirmationToken',
+      'quoteTokenHash',
+      'publicIdempotencyKey',
+      'stripeCheckoutSessionId',
+      'stripeConnectedAccountId',
+      'stripeAmountTotal',
+      'checkoutExpiresAt',
     ],
   },
   physicalRooms: {
