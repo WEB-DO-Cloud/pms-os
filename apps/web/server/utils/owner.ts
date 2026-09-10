@@ -82,6 +82,7 @@ export function filterOwnerBookings(
       if (filter.propertyId != null && r.propertyId !== filter.propertyId) {
         return false
       }
+      if (r.status === 'pending_payment') return false
       return true
     })
     .map(toOwnerBooking)
