@@ -105,7 +105,7 @@ export function isSyncDataStale(
 }
 
 function isReportable(r: ReservationRecord): boolean {
-  if (r.status === 'cancelled') return false
+  if (r.status === 'cancelled' || r.status === 'pending_payment') return false
   return ACTIVE_STATUSES.has(r.status) || r.status === 'confirmed'
 }
 
