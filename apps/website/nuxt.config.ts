@@ -6,23 +6,23 @@ export default defineNuxtConfig({
   srcDir: 'app',
   app: {
     head: {
-      title: 'PMS OS — Property operations for Channex portfolios',
+      title: 'PMS.do — Open-source PMS for hotels and vacation rentals',
       htmlAttrs: { lang: 'en' },
       meta: [
         {
           name: 'description',
           content:
-            'Open-source property management for hotels and vacation rentals. Sync bookings from Channex, run operations, self-host or use the commercial platform.',
+            'Open-source property management for hotels and vacation rentals in the US, UK, EU, Canada, and the Caribbean. Self-host free under AGPL-3.0, or let us host it. Labeled in USD. No per-room feature fees.',
         },
         { name: 'theme-color', content: '#0b3d36' },
-        { property: 'og:title', content: 'PMS OS' },
+        { property: 'og:title', content: 'PMS.do' },
         {
           property: 'og:description',
-          content: 'Property operations for Channex-connected portfolios.',
+          content:
+            'Own the stack. Self-host free, or we host it for you. Hotels and vacation rentals, USD, Western operators.',
         },
         { property: 'og:type', content: 'website' },
         { property: 'og:url', content: 'https://pms.do/' },
-        { property: 'og:image', content: 'https://pms.do/hero-coastal-villa.jpg' },
       ],
       link: [
         { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
@@ -38,7 +38,19 @@ export default defineNuxtConfig({
       ],
     },
   },
-  // Marketing site — never import @pms/* server packages.
+  // Matches Caddy edge cache rules.
+  routeRules: {
+    '/**': {
+      headers: {
+        'Cache-Control': 'public, max-age=300, s-maxage=3600',
+      },
+    },
+    '/_nuxt/**': {
+      headers: {
+        'Cache-Control': 'public, max-age=31536000, immutable',
+      },
+    },
+  },
   typescript: {
     typeCheck: false,
   },
